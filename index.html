@@ -1,0 +1,2151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My Family Tree</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#3f7d4e">
+  <link rel="icon" type="image/png" href="icon-192.png">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <style>
+    :root {
+      --green: #3f7d4e;
+      --green-light: #e6f2e8;
+      --line: #8fae92;
+      --bg: #f6f3ec;
+      --text: #2b2b2b;
+      --muted: #6b6b6b;
+      --pet-bg: #fff4dc;
+      --pet-color: #d9962b;
+      --danger: #b3402f;
+      --blue: #2f6fa5;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 12px;
+      line-height: 1.4;
+    }
+    .page { max-width: 900px; margin: 0 auto; }
+    h1 { text-align: center; color: var(--green); font-size: 1.6rem; margin: 8px 0 16px; }
+    h3 { margin: 0 0 12px; }
+    h4 { margin: 16px 0 8px; }
+
+    .panel {
+      background: #fff;
+      border-radius: 12px;
+      padding: 16px;
+      margin: 16px 0;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+    }
+
+    /* ---- The tree canvas ---- */
+    .treeHead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .treeHead h3 { margin: 0; }
+    .zoomBtns { display: flex; gap: 6px; }
+    #treeScroll { overflow: auto; max-height: 80vh; border: 1px solid #eee; border-radius: 8px; background: #fcfbf8; }
+    #sizer { position: relative; }
+    #canvas { position: relative; transform-origin: 0 0; }
+    svg.lines { position: absolute; left: 0; top: 0; z-index: 0; pointer-events: none; }
+    .line  { fill: none; stroke: var(--line); stroke-width: 2; }
+    .pline { fill: none; stroke: var(--pet-color); stroke-width: 2; stroke-dasharray: 5 4; }
+    .uline { fill: none; stroke-width: 3; }
+    .uline.married  { stroke: var(--green); }
+    .uline.divorced { stroke: var(--danger); stroke-dasharray: 6 5; }
+    .uline.partners { stroke: var(--blue); }
+    .uline.plain    { stroke: #999; }
+
+    /* The label on the link between two people */
+    .bond {
+      position: absolute;
+      z-index: 2;
+      transform: translate(-50%, -50%);
+      white-space: nowrap;
+      font-size: 0.72rem;
+      font-weight: bold;
+      padding: 2px 8px;
+      border-radius: 12px;
+      cursor: pointer;
+      background: var(--green-light);
+      color: var(--green);
+      border: 1px solid var(--green);
+      user-select: none;
+    }
+    .bond.divorced { background: #f8e3df; color: var(--danger); border: 1px dashed var(--danger); }
+    .bond.partners { background: #e4eef9; color: var(--blue); border: 1px solid var(--blue); }
+    .bond.plain { background: #fff; color: #777; border: 1px solid #aaa; padding: 0 7px; font-size: 0.9rem; }
+
+    /* One person or pet */
+    .card {
+      position: absolute;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-top: 5px solid var(--green);
+      border-radius: 10px;
+      padding: 6px 8px;
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+    }
+    .card.pet { background: var(--pet-bg); border-top-color: var(--pet-color); }
+    .card.dead { background: #ecebe8; color: #555; border-top-color: #8a8a8a; }
+    .card.male:not(.pet)   { border-top-color: #3d7ab8; }
+    .card.female:not(.pet) { border-top-color: #c75d86; }
+    .card.editing { outline: 3px solid #4a90d9; }
+    .cname {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      word-break: break-word;
+      line-height: 1.25;
+    }
+    .cinfo {
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 0.72rem;
+      line-height: 1.25;
+    }
+    .actions { display: flex; gap: 6px; margin-top: auto; }
+    .gsym { font-size: 1.05rem; margin-left: 4px; }
+    .gsym.male { color: #2f6fa5; }
+    .gsym.female { color: #c2477f; }
+
+    /* Buttons */
+    button {
+      font: inherit;
+      border: 0;
+      border-radius: 8px;
+      padding: 10px 16px;
+      background: var(--green);
+      color: #fff;
+      cursor: pointer;
+    }
+    button.small { padding: 4px 10px; font-size: 0.8rem; }
+    button.edit { background: var(--green-light); color: var(--green); }
+    button.danger { background: #f8e3df; color: var(--danger); }
+    button.grey { background: #ddd; color: #333; }
+
+    /* Form */
+    .field { display: block; margin-bottom: 12px; font-size: 0.9rem; color: var(--muted); }
+    textarea {
+      display: block;
+      width: 100%;
+      font: inherit;
+      font-size: 16px;
+      padding: 9px;
+      margin-top: 4px;
+      border: 1px solid #bbb;
+      border-radius: 8px;
+      background: #fff;
+      color: var(--text);
+      resize: vertical;
+    }
+    .collapseHead { display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none; }
+    .collapseHead h3 { margin: 0; }
+    .collapseHead .count { font-weight: normal; color: var(--muted); font-size: 0.9rem; }
+    .collapseHead .arrow {
+      color: var(--green);
+      font-size: 0.9rem;
+      font-weight: bold;
+      padding: 4px 12px;
+      border-radius: 14px;
+      background: var(--green-light);
+    }
+    .treeCount { margin-top: 6px; text-align: left; font-size: 0.8rem; color: var(--muted); }
+    .card { cursor: pointer; }
+    .nbadge { position: absolute; right: 7px; bottom: 9px; font-size: 0.9rem; }
+
+    /* The window with all the information about one person */
+    .modal {
+      display: none;
+      position: fixed;
+      left: 0; top: 0; right: 0; bottom: 0;
+      z-index: 50;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      background: rgba(0, 0, 0, 0.45);
+    }
+    .modalBox {
+      background: #fff;
+      border-radius: 12px;
+      padding: 20px;
+      width: 100%;
+      max-width: 560px;
+      max-height: 85vh;
+      overflow: auto;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    }
+    .modalBox h3 { font-size: 1.3rem; margin-bottom: 12px; }
+    .infoRow { display: flex; gap: 10px; padding: 5px 0; border-bottom: 1px solid #eee; }
+    .infoRow .lab { flex: 0 0 120px; color: var(--muted); font-size: 0.9rem; }
+    .infoRow .val { flex: 1; }
+    .bio { white-space: pre-wrap; margin: 6px 0 0; line-height: 1.5; }
+    .bio.none { color: var(--muted); font-style: italic; }
+    input[type=text], input[type=date], select {
+      display: block;
+      width: 100%;
+      font: inherit;
+      font-size: 16px;
+      padding: 9px;
+      margin-top: 4px;
+      border: 1px solid #bbb;
+      border-radius: 8px;
+      background: #fff;
+      color: var(--text);
+    }
+    .choice {
+      display: inline-block;
+      padding: 8px 14px;
+      margin: 0 6px 12px 0;
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: var(--green-light);
+    }
+    .check { display: block; margin-bottom: 12px; }
+    .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .empty { text-align: center; color: var(--muted); padding: 16px; }
+    .buttons { display: flex; gap: 8px; margin-top: 4px; }
+
+    /* List of relationships */
+    .unionRow {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 0;
+      border-bottom: 1px solid #eee;
+    }
+    .unionRow span { flex: 1 1 140px; font-weight: bold; }
+    .unionRow select { display: inline-block; width: auto; margin-top: 0; }
+
+    @media (max-width: 520px) {
+      .two { grid-template-columns: 1fr; gap: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1>My Family Tree</h1>
+
+    <div class="panel">
+      <div class="treeHead">
+        <h3>Tree</h3>
+        <span class="zoomBtns">
+          <button class="small grey" onclick="zoomBy(-0.1)">&minus;</button>
+          <button class="small grey" onclick="fitTree()">Fit</button>
+          <button class="small grey" onclick="zoomBy(0.1)">+</button>
+        </span>
+      </div>
+      <label class="field" style="margin-bottom:8px">Main person (the tree grows outwards from them: their own family on the left, their partner's family on the right)
+        <select id="focusSel" onchange="changeFocus(this.value)"></select>
+      </label>
+      <div id="treeMsg"></div>
+      <div id="treeScroll"><div id="sizer"><div id="canvas"></div></div></div>
+      <div id="treeCount" class="treeCount"></div>
+      <p class="empty" style="padding:8px 0 0;font-size:0.8rem">
+        Tip: click the label between two people to change married / divorced / partners.
+        Each family's lines to their children have their own color.
+        Cards have a blue top edge for men and a rose one for women.
+        Click a card to see everything about that person, including their biography.
+      </p>
+    </div>
+
+    <div id="formPanel" class="panel">
+      <h3 id="formTitle">Add a person</h3>
+
+      <label class="choice"><input type="radio" name="type" id="typePerson" value="person" checked onchange="toggleType()"> Person</label>
+      <label class="choice"><input type="radio" name="type" id="typePet" value="pet" onchange="toggleType()"> Pet</label>
+
+      <label class="field">Name
+        <input type="text" id="name" placeholder="Name">
+      </label>
+      <div id="genderRows" class="two">
+        <label class="field">Gender
+          <select id="gender" onchange="toggleGender()">
+            <option value="">Not specified</option>
+            <option value="male">Male</option>
+            <option value="female">Female</option>
+          </select>
+        </label>
+        <label class="field" id="maidenRow" style="display:none">Maiden name (name at birth)
+          <input type="text" id="maiden" placeholder="e.g. Karatas" autocomplete="off">
+        </label>
+      </div>
+      <div class="two">
+        <label class="field">Birth date (year is enough)
+          <input type="text" id="birth" placeholder="1963, 1963-08 or 16.08.1963" autocomplete="off">
+        </label>
+        <label class="field">Birth date is
+          <select id="birthApprox">
+            <option value="exact">Exact</option>
+            <option value="approx">Approximate</option>
+          </select>
+        </label>
+      </div>
+
+      <label class="check"><input type="checkbox" id="alive" checked onchange="toggleDeath()"> Alive</label>
+      <div id="deathRow" style="display:none">
+        <div class="two">
+          <label class="field">Death date (year is enough, or leave empty)
+            <input type="text" id="death" placeholder="2015, 2015-06 or 01.06.2015" autocomplete="off">
+          </label>
+          <label class="field">Death date is
+            <select id="deathApprox">
+              <option value="exact">Exact</option>
+              <option value="approx">Approximate</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <label class="field">Biography / information (optional)
+        <textarea id="notes" rows="6" placeholder="Where they were born and lived, if they migrated, work, family stories, anything you want to remember..."></textarea>
+      </label>
+
+      <div id="personRows">
+        <div class="two">
+          <label class="field">Parent 1 <select id="parent1"></select></label>
+          <label class="field">Parent 2 <select id="parent2"></select></label>
+        </div>
+      </div>
+
+      <div id="petRows" style="display:none">
+        <label class="field">Species
+          <input type="text" id="species" placeholder="e.g. dog, cat">
+        </label>
+        <div class="two">
+          <label class="field">Owner 1 <select id="owner"></select></label>
+          <label class="field">Owner 2 <select id="owner2"></select></label>
+        </div>
+      </div>
+
+      <div class="buttons">
+        <button id="saveBtn" onclick="savePerson()">Add</button>
+        <button id="cancelBtn" class="grey" onclick="cancelEdit()" style="display:none">Cancel</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="collapseHead" id="unionHead" role="button" tabindex="0" aria-expanded="false"
+           onclick="toggleUnions()"
+           onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggleUnions(); }">
+        <h3>Relationships <span id="unionCount" class="count"></span></h3>
+        <span id="unionArrow" class="arrow">&#9654; Show</span>
+      </div>
+      <div id="unionBody" style="display:none; margin-top:12px">
+      <div id="unionList"></div>
+
+      <h4>Add a relationship</h4>
+      <div class="two">
+        <label class="field">Person 1 <select id="unionA"></select></label>
+        <label class="field">Person 2 <select id="unionB"></select></label>
+      </div>
+      <label class="field">Status
+        <select id="unionStatus">
+          <option value="married">Married</option>
+          <option value="divorced">Divorced</option>
+          <option value="partners">Partners (not married)</option>
+        </select>
+      </label>
+      <button onclick="addUnion()">Add relationship</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Backup</h3>
+      <button onclick="exportData()">Export backup</button>
+      <label class="field" style="margin-top:12px">Import backup
+        <input type="file" id="importFile" accept=".json" onchange="importData(this)">
+      </label>
+    </div>
+  </div>
+
+  <div id="infoModal" class="modal" onclick="if (event.target === this) closeInfo()">
+    <div class="modalBox">
+      <div id="infoBody"></div>
+      <div class="buttons" style="margin-top:16px">
+        <button id="infoEditBtn" onclick="editFromInfo()">Edit</button>
+        <button class="grey" onclick="closeInfo()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    var people =JSON.parse(localStorage.getItem("people")) || [];
+    var unions = JSON.parse(localStorage.getItem("unions")) || []; // couples
+    var focusId = JSON.parse(localStorage.getItem("focusId") || '""'); // the "main person"
+    var editingId = null;  // null means we are adding, not editing
+    var lastId = 0;
+    var scale = 1;                 // zoom of the tree
+    var treeSize = { w: 0, h: 0 }; // size of the drawn tree
+
+    var NS = "http://www.w3.org/2000/svg";
+    var STATUS_NAMES = { married: "married", divorced: "divorced", partners: "partners" };
+    var STATUS_CYCLE = ["married", "divorced", "partners", ""];
+
+    // Sizes used to place the cards (in pixels)
+    var CARD_W = 150;      // card width
+    var CARD_H = 128;      // card height
+    var COUPLE_GAP = 80;   // space between two partners
+    var SIB_GAP = 24;      // space between brothers and sisters
+    var GROUP_GAP = 40;    // space between children of different couples
+    var ROOT_GAP = 60;     // space between separate families
+    var ROW_GAP = 80;      // vertical space between generations
+    var ROW_H = CARD_H + ROW_GAP;
+    var PAD = 24;
+
+    // A fresh unique number for every new person or relationship
+    function newId() {
+      var id = Date.now();
+      if (id <= lastId) id = lastId + 1;
+      lastId = id;
+      return id;
+    }
+
+    // Upgrade old saved data to the newest format
+    function upgradeData() {
+      for (var i = 0; i < people.length; i++) {
+        var p = people[i];
+        if (typeof p === "string") p = { name: p };
+        if (p.birth === undefined) p.birth = p.year || "";
+        delete p.year;
+        if (p.id === undefined) p.id = newId();
+        if (p.parent1Id === undefined) {
+          p.parent1Id = p.parentId === undefined ? "" : p.parentId;
+        }
+        if (p.parent2Id === undefined) p.parent2Id = "";
+        delete p.parentId;
+        if (p.alive === undefined) p.alive = true;
+        if (p.death === undefined) p.death = "";
+        if (p.gender === undefined) p.gender = "";
+        if (p.maidenName === undefined) p.maidenName = "";
+        if (p.notes === undefined) p.notes = "";
+        if (p.birthApprox === undefined) p.birthApprox = false;
+        if (p.deathApprox === undefined) p.deathApprox = false;
+        if (p.type === undefined) p.type = "person";
+        if (p.species === undefined) p.species = "";
+        if (p.ownerId === undefined) p.ownerId = "";
+        if (p.owner2Id === undefined) p.owner2Id = "";
+        people[i] = p;
+      }
+
+      for (var j = 0; j < people.length; j++) {
+        var q = people[j];
+        // Old single "partner" links become relationships
+        if (q.partnerId !== undefined && q.partnerId !== "" && q.type !== "pet") {
+          var other = findPerson(q.partnerId);
+          if (other !== null && other.type !== "pet" && other.id !== q.id &&
+              findUnion(q.id, other.id) === null) {
+            unions.push({ id: newId(), aId: q.id, bId: other.id, status: "married" });
+          }
+        }
+        delete q.partnerId;
+        // A pet's owners must exist and must be people
+        if (q.ownerId !== "") {
+          var o1 = findPerson(q.ownerId);
+          if (o1 === null || o1.type === "pet") q.ownerId = "";
+        }
+        if (q.owner2Id !== "") {
+          var o2 = findPerson(q.owner2Id);
+          if (o2 === null || o2.type === "pet") q.owner2Id = "";
+        }
+      }
+
+      // Clean the relationships: both people must exist, no duplicates
+      var clean = [];
+      for (var k = 0; k < unions.length; k++) {
+        var u = unions[k];
+        var a = findPerson(u.aId);
+        var b = findPerson(u.bId);
+        if (a === null || b === null || a.type === "pet" || b.type === "pet" || a.id === b.id) continue;
+        var duplicate = false;
+        for (var m = 0; m < clean.length; m++) {
+          var c = clean[m];
+          if ((c.aId === u.aId && c.bId === u.bId) || (c.aId === u.bId && c.bId === u.aId)) duplicate = true;
+        }
+        if (duplicate) continue;
+        if (u.id === undefined) u.id = newId();
+        if (u.swap === undefined) u.swap = false;
+        if (STATUS_NAMES[u.status] === undefined) u.status = "";
+        clean.push(u);
+      }
+      unions = clean;
+      ensureUnions();
+    }
+
+    // Two people who share a child always count as a couple
+    function ensureUnions() {
+      for (var i = 0; i < people.length; i++) {
+        var c = people[i];
+        if (isPet(c) || c.parent1Id === "" || c.parent2Id === "") continue;
+        if (findUnion(c.parent1Id, c.parent2Id) === null) {
+          unions.push({ id: newId(), aId: c.parent1Id, bId: c.parent2Id, status: "" });
+        }
+      }
+    }
+
+    function save() {
+      localStorage.setItem("people", JSON.stringify(people));
+      localStorage.setItem("unions", JSON.stringify(unions));
+      localStorage.setItem("focusId", JSON.stringify(focusId));
+    }
+
+    function findPerson(id) {
+      for (var i = 0; i < people.length; i++) {
+        if (people[i].id === id) return people[i];
+      }
+      return null;
+    }
+
+    function findUnion(a, b) {
+      for (var i = 0; i < unions.length; i++) {
+        var u = unions[i];
+        if ((u.aId === a && u.bId === b) || (u.aId === b && u.bId === a)) return u;
+      }
+      return null;
+    }
+
+    function findUnionById(id) {
+      for (var i = 0; i < unions.length; i++) {
+        if (unions[i].id === id) return unions[i];
+      }
+      return null;
+    }
+
+    // All relationships a person is part of
+    function unionsOf(id) {
+      return unions.filter(function (u) { return u.aId === id || u.bId === id; });
+    }
+
+    // The other person in a relationship
+    function partnerIn(u, id) {
+      return findPerson(u.aId === id ? u.bId : u.aId);
+    }
+
+    function isPet(person) {
+      return person.type === "pet";
+    }
+
+    function hasParents(person) {
+      return person.parent1Id !== "" || person.parent2Id !== "";
+    }
+
+    // All children, grandchildren, etc. of a person
+    function descendantIds(id) {
+      var result = [];
+      for (var i = 0; i < people.length; i++) {
+        var c = people[i];
+        if (c.parent1Id === id || c.parent2Id === id) {
+          result.push(c.id);
+          result = result.concat(descendantIds(c.id));
+        }
+      }
+      return result;
+    }
+
+    // All parents, grandparents, etc. of a person
+    function ancestorIds(id) {
+      var person = findPerson(id);
+      var result = [];
+      if (person === null) return result;
+      if (person.parent1Id !== "") {
+        result = result.concat([person.parent1Id], ancestorIds(person.parent1Id));
+      }
+      if (person.parent2Id !== "") {
+        result = result.concat([person.parent2Id], ancestorIds(person.parent2Id));
+      }
+      return result;
+    }
+
+    // =====================================================
+    //  LAYOUT: working out where every card goes
+    // =====================================================
+
+    // Which row (generation) everyone is in. Returns null if the data
+    // contains a loop (for example someone being their own ancestor).
+    // Everyone of the same generation is placed in the same row: partners
+    // share a row, children are exactly one row below their parents, and
+    // so the parents of both partners end up in the same row as well.
+    function computeLevels() {
+      var base = computeBaseLevels();
+      if (base === null) return null;
+      var level = {};
+      var adj = {};
+      var persons = people.filter(function (p) { return !isPet(p); });
+      var i, j;
+      for (i = 0; i < persons.length; i++) adj[persons[i].id] = [];
+      function link(a, b, d) {
+        if (adj[a] === undefined || adj[b] === undefined) return;
+        adj[a].push({ id: b, d: d });
+        adj[b].push({ id: a, d: -d });
+      }
+      for (i = 0; i < unions.length; i++) link(unions[i].aId, unions[i].bId, 0);
+      for (i = 0; i < persons.length; i++) {
+        if (persons[i].parent1Id !== "") link(persons[i].parent1Id, persons[i].id, 1);
+        if (persons[i].parent2Id !== "") link(persons[i].parent2Id, persons[i].id, 1);
+      }
+      var gen = {};
+      for (i = 0; i < persons.length; i++) {
+        if (gen[persons[i].id] !== undefined) continue;
+        var members = [persons[i].id];
+        var queue = [persons[i].id];
+        var conflict = false;
+        gen[persons[i].id] = 0;
+        while (queue.length > 0) {
+          var cur = queue.shift();
+          for (j = 0; j < adj[cur].length; j++) {
+            var e = adj[cur][j];
+            var expected = gen[cur] + e.d;
+            if (gen[e.id] === undefined) {
+              gen[e.id] = expected;
+              members.push(e.id);
+              queue.push(e.id);
+            } else if (gen[e.id] !== expected) {
+              conflict = true;
+            }
+          }
+        }
+        var lowest = 0;
+        for (j = 0; j < members.length; j++) lowest = Math.min(lowest, gen[members[j]]);
+        for (j = 0; j < members.length; j++) {
+          // if the family tree contradicts itself, fall back to the simple rule
+          level[members[j]] = conflict ? base[members[j]] : gen[members[j]] - lowest;
+        }
+      }
+      // pets live one row below their owners
+      for (i = 0; i < people.length; i++) {
+        var x = people[i];
+        if (!isPet(x)) continue;
+        var best = -1;
+        var owners = [x.ownerId, x.owner2Id];
+        for (j = 0; j < owners.length; j++) {
+          if (owners[j] !== "" && level[owners[j]] !== undefined) best = Math.max(best, level[owners[j]]);
+        }
+        level[x.id] = best + 1;
+      }
+      return level;
+    }
+
+    // The simple rule: partners share a row, children are at least one
+    // row below their parents (this only moves people down as far as needed)
+    function computeBaseLevels() {
+      var level = {};
+      var i;
+      for (i = 0; i < people.length; i++) level[people[i].id] = 0;
+      var changed = true;
+      var rounds = 0;
+      function raise(id, value) {
+        if (level[id] === undefined) return;
+        if (level[id] < value) { level[id] = value; changed = true; }
+      }
+      while (changed && rounds <= people.length + 3) {
+        changed = false;
+        rounds++;
+        for (i = 0; i < people.length; i++) {
+          var x = people[i];
+          var a, b;
+          if (isPet(x)) { a = x.ownerId; b = x.owner2Id; }
+          else { a = x.parent1Id; b = x.parent2Id; }
+          var base = -1;
+          if (a !== "" && level[a] !== undefined) base = Math.max(base, level[a]);
+          if (b !== "" && level[b] !== undefined) base = Math.max(base, level[b]);
+          if (base >= 0) raise(x.id, base + 1);
+        }
+        for (i = 0; i < unions.length; i++) {
+          var u = unions[i];
+          if (level[u.aId] === undefined || level[u.bId] === undefined) continue;
+          var top = Math.max(level[u.aId], level[u.bId]);
+          raise(u.aId, top);
+          raise(u.bId, top);
+        }
+      }
+      return changed ? null : level;
+    }
+
+    // People with parents come first, so their partners are placed beside them
+    function rankOf(person) {
+      if (person.id === focusId) return -1; // the main person always leads their couple
+      return (hasParents(person) ? 0 : 100000) + people.indexOf(person);
+    }
+
+    // Where a child or pet hangs in the tree: under a couple ("u..")
+    // or under a single person ("p.."), or nowhere (null)
+    function homeKey(x) {
+      var a, b;
+      if (isPet(x)) { a = x.ownerId; b = x.owner2Id; }
+      else { a = x.parent1Id; b = x.parent2Id; }
+      var pa = a === "" ? null : findPerson(a);
+      var pb = b === "" ? null : findPerson(b);
+      if (pa !== null && isPet(pa)) pa = null;
+      if (pb !== null && isPet(pb)) pb = null;
+      if (pa !== null && pb !== null) {
+        var u = findUnion(a, b);
+        if (u !== null) return "u" + u.id;
+        return "p" + a;
+      }
+      if (pa !== null) return "p" + a;
+      if (pb !== null) return "p" + b;
+      return null;
+    }
+
+    // Order the people of one "cluster" (a person and everyone linked to
+    // them by a relationship) in a row. The main person ends up in the
+    // middle, so every relationship sits directly between two neighbours.
+    function rowOrder(x, dir, kids, isRoot) {
+      var k = kids[x.id];
+      var left = [], right = [];
+      if (isRoot) {
+        if (k.length >= 2) { left = [k[0]]; right = k.slice(1); }
+        else right = k.slice();
+      } else if (dir < 0) left = k.slice();
+      else right = k.slice();
+      var out = [];
+      for (var i = left.length - 1; i >= 0; i--) out = out.concat(rowOrder(left[i], -1, kids, false));
+      out.push(x);
+      for (var j = 0; j < right.length; j++) out = out.concat(rowOrder(right[j], 1, kids, false));
+      return out;
+    }
+
+    function makeCluster(main, clusterOf) {
+      var kids = {};
+      var seen = {};
+      kids[main.id] = [];
+      seen[main.id] = true;
+      function visit(x) {
+        var list = unionsOf(x.id);
+        for (var i = 0; i < list.length; i++) {
+          var q = partnerIn(list[i], x.id);
+          if (q === null || seen[q.id]) continue;
+          seen[q.id] = true;
+          kids[q.id] = [];
+          kids[x.id].push(q);
+          visit(q);
+        }
+      }
+      visit(main);
+      var members = rowOrder(main, 0, kids, true);
+      var cluster = { id: main.id, members: members, index: {}, groups: [], arranged: false, w: 0, rowDx: 0 };
+      for (var i = 0; i < members.length; i++) {
+        clusterOf[members[i].id] = cluster;
+        cluster.index[members[i].id] = i;
+      }
+      return cluster;
+    }
+
+    // Works out the width of a cluster and of all the families below it
+    function arrange(cluster, ctx) {
+      cluster.arranged = true;
+      var n = cluster.members.length;
+      var rowW = n * CARD_W + (n - 1) * COUPLE_GAP;
+      var gs = cluster.groups.slice().sort(function (a, b) { return a.anchorX - b.anchorX; });
+      var prevRight = -1000000000;
+      var minX = 0, maxX = rowW;
+      for (var i = 0; i < gs.length; i++) {
+        var g = gs[i];
+        g.blocks = [];
+        var w = 0;
+        for (var j = 0; j < g.items.length; j++) {
+          var item = g.items[j];
+          var block;
+          if (isPet(item)) {
+            if (ctx.claimed[item.id]) continue;
+            ctx.claimed[item.id] = true;
+            block = { pet: item, w: CARD_W };
+          } else {
+            var c = ctx.clusterOf[item.id];
+            if (c === undefined || c.arranged) continue;
+            arrange(c, ctx);
+            block = { cluster: c, w: c.w };
+          }
+          if (g.blocks.length > 0) w += SIB_GAP;
+          block.dx = w;
+          w += block.w;
+          g.blocks.push(block);
+        }
+        if (g.blocks.length === 0) continue;
+        g.w = w;
+        g.rel = Math.max(g.anchorX - w / 2, prevRight + GROUP_GAP);
+        prevRight = g.rel + w;
+        minX = Math.min(minX, g.rel);
+        maxX = Math.max(maxX, g.rel + w);
+      }
+      cluster.rowDx = -minX;
+      for (var k = 0; k < gs.length; k++) {
+        if (gs[k].blocks.length > 0) gs[k].rel -= minX;
+      }
+      cluster.w = maxX - minX;
+    }
+
+    // Writes the final position of every card in a cluster and below it
+    function assign(cluster, x0, ctx) {
+      var step = CARD_W + COUPLE_GAP;
+      for (var i = 0; i < cluster.members.length; i++) {
+        var m = cluster.members[i];
+        ctx.pos[m.id] = { x: x0 + cluster.rowDx + i * step, y: PAD + ctx.level[m.id] * ROW_H };
+      }
+      for (var g = 0; g < cluster.groups.length; g++) {
+        var group = cluster.groups[g];
+        if (!group.blocks || group.blocks.length === 0) continue;
+        for (var b = 0; b < group.blocks.length; b++) {
+          var block = group.blocks[b];
+          var bx = x0 + group.rel + block.dx;
+          if (block.pet) ctx.pos[block.pet.id] = { x: bx, y: PAD + ctx.level[block.pet.id] * ROW_H };
+          else assign(block.cluster, bx, ctx);
+        }
+      }
+    }
+
+    // Returns { pos, groups, clusterOf, w, h } or null when the data has a loop
+    function computeLayout() {
+      var level = computeLevels();
+      if (level === null) return null;
+      var ctx = { level: level, pos: {}, clusterOf: {}, claimed: {} };
+
+      // 1. clusters of people linked by relationships
+      var persons = people.filter(function (p) { return !isPet(p); });
+      persons.sort(function (a, b) { return rankOf(a) - rankOf(b); });
+      var clusters = [];
+      for (var i = 0; i < persons.length; i++) {
+        if (ctx.clusterOf[persons[i].id] !== undefined) continue;
+        clusters.push(makeCluster(persons[i], ctx.clusterOf));
+      }
+
+      // 2. children and pets, grouped by the couple or person they hang from
+      var groupMap = {};
+      var groups = [];
+      var loosePets = [];
+      var step = CARD_W + COUPLE_GAP;
+      for (i = 0; i < people.length; i++) {
+        var x = people[i];
+        var key = homeKey(x);
+        if (key === null) {
+          if (isPet(x)) loosePets.push(x);
+          continue;
+        }
+        var g = groupMap[key];
+        if (g === undefined) {
+          g = { key: key, items: [], union: null, person: null, cluster: null, anchorX: 0 };
+          var idNum = Number(key.slice(1));
+          if (key.charAt(0) === "u") {
+            g.union = findUnionById(idNum);
+            g.cluster = ctx.clusterOf[g.union.aId];
+            var ia = g.cluster.index[g.union.aId];
+            var ib = g.cluster.index[g.union.bId];
+            g.anchorX = ((ia + ib) / 2) * step + CARD_W / 2;
+          } else {
+            g.person = findPerson(idNum);
+            g.cluster = ctx.clusterOf[g.person.id];
+            g.anchorX = g.cluster.index[g.person.id] * step + CARD_W / 2;
+          }
+          groupMap[key] = g;
+          groups.push(g);
+          g.cluster.groups.push(g);
+        }
+        g.items.push(x);
+      }
+      // children first (oldest on the left), pets after them
+      for (i = 0; i < groups.length; i++) {
+        groups[i].items.sort(function (a, b) {
+          if (isPet(a) !== isPet(b)) return isPet(a) ? 1 : -1;
+          if (!isPet(a) && a.birth !== "" && b.birth !== "" && a.birth !== b.birth) {
+            return a.birth < b.birth ? -1 : 1;
+          }
+          return people.indexOf(a) - people.indexOf(b);
+        });
+      }
+
+      // 3. place the separate families side by side, left to right
+      var cursor = PAD;
+      function placeRoot(cluster) {
+        arrange(cluster, ctx);
+        assign(cluster, cursor, ctx);
+        cursor += cluster.w + ROOT_GAP;
+      }
+      for (i = 0; i < clusters.length; i++) {
+        var anyParents = clusters[i].members.some(hasParents);
+        if (!anyParents && !clusters[i].arranged) placeRoot(clusters[i]);
+      }
+      for (i = 0; i < clusters.length; i++) {
+        if (!clusters[i].arranged) placeRoot(clusters[i]); // safety net
+      }
+      for (i = 0; i < loosePets.length; i++) {
+        if (ctx.pos[loosePets[i].id] !== undefined) continue;
+        ctx.pos[loosePets[i].id] = { x: cursor, y: PAD + level[loosePets[i].id] * ROW_H };
+        cursor += CARD_W + SIB_GAP;
+      }
+
+      // 3b. Improve the left-to-right order. Each row is a list of boxes
+      //     (a couple, a person, or a pet). We repeatedly move every box
+      //     towards the middle of the boxes it is connected to, keep the
+      //     order and spacing valid, and flip couples so that each partner
+      //     stands on the same side as their own parents.
+      var NODE_GAP = 36;
+      var nodes = [];
+      var petNode = {};
+      var halfW = CARD_W / 2;
+      var j2;
+      for (i = 0; i < clusters.length; i++) {
+        var cl = clusters[i];
+        cl.uid = cl.id;
+        cl.rw = cl.members.length * CARD_W + (cl.members.length - 1) * COUPLE_GAP;
+        cl.x = ctx.pos[cl.members[0].id].x;
+        cl.level = level[cl.members[0].id];
+        nodes.push(cl);
+      }
+      for (i = 0; i < people.length; i++) {
+        if (!isPet(people[i])) continue;
+        var pn = { uid: people[i].id, members: [people[i]], index: {}, rw: CARD_W,
+                   x: ctx.pos[people[i].id].x, level: level[people[i].id] };
+        pn.index[people[i].id] = 0;
+        petNode[people[i].id] = pn;
+        nodes.push(pn);
+      }
+      function offOf(nd, id) { return nd.index[id] * step + halfW; }
+      function anchorOffset(g) {
+        var P = g.cluster;
+        if (g.union !== null) return ((P.index[g.union.aId] + P.index[g.union.bId]) / 2) * step + halfW;
+        return P.index[g.person.id] * step + halfW;
+      }
+      var upOf = {}, downOf = {};
+      for (i = 0; i < nodes.length; i++) { upOf[nodes[i].uid] = []; downOf[nodes[i].uid] = []; }
+      for (i = 0; i < groups.length; i++) {
+        for (j2 = 0; j2 < groups[i].items.length; j2++) {
+          var it = groups[i].items[j2];
+          var cnode = isPet(it) ? petNode[it.id] : ctx.clusterOf[it.id];
+          if (cnode === undefined || cnode === groups[i].cluster) continue;
+          var edge = { g: groups[i], P: groups[i].cluster, C: cnode, id: it.id };
+          upOf[cnode.uid].push(edge);
+          downOf[groups[i].cluster.uid].push(edge);
+        }
+      }
+      function edgeCost(nd) {
+        var cost = 0, k, e;
+        for (k = 0; k < upOf[nd.uid].length; k++) {
+          e = upOf[nd.uid][k];
+          cost += Math.abs((e.P.x + anchorOffset(e.g)) - (nd.x + offOf(nd, e.id)));
+        }
+        for (k = 0; k < downOf[nd.uid].length; k++) {
+          e = downOf[nd.uid][k];
+          cost += Math.abs((e.C.x + offOf(e.C, e.id)) - (nd.x + anchorOffset(e.g)));
+        }
+        return cost;
+      }
+      function flipCluster(nd) {
+        nd.members.reverse();
+        for (var k = 0; k < nd.members.length; k++) nd.index[nd.members[k].id] = k;
+      }
+      function desiredX(nd) {
+        var sum = 0, cnt = 0, k, e;
+        for (k = 0; k < upOf[nd.uid].length; k++) {
+          e = upOf[nd.uid][k];
+          sum += (e.P.x + anchorOffset(e.g)) - offOf(nd, e.id);
+          cnt++;
+        }
+        for (k = 0; k < downOf[nd.uid].length; k++) {
+          e = downOf[nd.uid][k];
+          sum += (e.C.x + offOf(e.C, e.id)) - anchorOffset(e.g);
+          cnt++;
+        }
+        return cnt === 0 ? nd.x : sum / cnt;
+      }
+      // keep the order of the row, as close as possible to the wanted places
+      function placeRow(list) {
+        var want = {};
+        var k;
+        for (k = 0; k < list.length; k++) want[list[k].uid] = desiredX(list[k]);
+        list.sort(function (a, b) {
+          var diff = want[a.uid] - want[b.uid];
+          if (Math.abs(diff) > 0.5) return diff;
+          return a.x - b.x;
+        });
+        packRow(list, want);
+      }
+      // place the boxes of a row in the given order, without overlap,
+      // as close as possible to the wanted left edges
+      function packRow(list, want) {
+        var k;
+        var offs = [], acc = 0;
+        for (k = 0; k < list.length; k++) { offs.push(acc); acc += list[k].rw + NODE_GAP; }
+        var blocks = [];
+        for (k = 0; k < list.length; k++) {
+          blocks.push({ from: k, cnt: 1, sum: want[list[k].uid] - offs[k] });
+          while (blocks.length > 1) {
+            var b2 = blocks[blocks.length - 1], b1 = blocks[blocks.length - 2];
+            if (b1.sum / b1.cnt <= b2.sum / b2.cnt) break;
+            b1.sum += b2.sum;
+            b1.cnt += b2.cnt;
+            blocks.pop();
+          }
+        }
+        for (k = 0; k < blocks.length; k++) {
+          var q = blocks[k].sum / blocks[k].cnt;
+          for (var m = blocks[k].from; m < blocks[k].from + blocks[k].cnt; m++) list[m].x = q + offs[m];
+        }
+      }
+      var rows = [];
+      var topLevel = 0;
+      for (i = 0; i < nodes.length; i++) topLevel = Math.max(topLevel, nodes[i].level);
+      for (i = 0; i <= topLevel; i++) rows.push([]);
+      for (i = 0; i < nodes.length; i++) rows[nodes[i].level].push(nodes[i]);
+      for (i = 0; i <= topLevel; i++) rows[i].sort(function (a, b) { return a.x - b.x; });
+
+      // 3c. Start from the "main person": their own side of the family is
+      //     placed on the left and their partner's side on the right, all
+      //     the way up. Everyone else starts near the people they are
+      //     connected to. The sweeps below then tidy up the details.
+      var lockedNode = null;
+      var focus = (focusId === "") ? null : findPerson(focusId);
+      if (focus !== null && !isPet(focus)) {
+        var avg = function (list) {
+          var s = 0;
+          for (var q = 0; q < list.length; q++) s += list[q];
+          return s / list.length;
+        };
+        var seedOf = {}; // person id -> wanted places (0 = far left, 1 = far right)
+        var addSeed = function (id, v) {
+          if (seedOf[id] === undefined) seedOf[id] = [];
+          seedOf[id].push(v);
+        };
+        var seedUp = function (pid, lo, hi, depth) {
+          addSeed(pid, (lo + hi) / 2);
+          if (depth > 14) return;
+          var pr = findPerson(pid);
+          var a = pr.parent1Id, b = pr.parent2Id;
+          if (a !== "" && (findPerson(a) === null || isPet(findPerson(a)))) a = "";
+          if (b !== "" && (findPerson(b) === null || isPet(findPerson(b)))) b = "";
+          if (a !== "" && b !== "") {
+            var un = findUnion(a, b);
+            var l = a, r = b;
+            if (un !== null && un.swap) { l = b; r = a; }
+            var mid = (lo + hi) / 2;
+            seedUp(l, lo, mid, depth + 1);
+            seedUp(r, mid, hi, depth + 1);
+          } else if (a !== "") seedUp(a, lo, hi, depth + 1);
+          else if (b !== "") seedUp(b, lo, hi, depth + 1);
+        };
+        lockedNode = ctx.clusterOf[focus.id];
+        for (i = 0; i < lockedNode.members.length; i++) {
+          seedUp(lockedNode.members[i].id, i / lockedNode.members.length, (i + 1) / lockedNode.members.length, 0);
+        }
+
+        // couples stand in the order of their own sides
+        for (i = 0; i < nodes.length; i++) {
+          var nd = nodes[i];
+          if (nd === lockedNode || nd.members.length < 2) continue;
+          var vals = nd.members.map(function (m) { return seedOf[m.id] === undefined ? null : avg(seedOf[m.id]); });
+          var score = 0;
+          for (var p1 = 0; p1 < vals.length; p1++) {
+            for (var p2 = p1 + 1; p2 < vals.length; p2++) {
+              if (vals[p1] === null || vals[p2] === null) continue;
+              score += vals[p2] > vals[p1] ? 1 : (vals[p2] < vals[p1] ? -1 : 0);
+            }
+          }
+          if (score < 0) flipCluster(nd);
+        }
+
+        // boxes that are in the focus person's ancestry get their seed directly,
+        // everyone else takes the average of the boxes they are connected to
+        var nodeSeed = {}, fixedSeed = {};
+        for (i = 0; i < nodes.length; i++) {
+          var vs = [];
+          for (j2 = 0; j2 < nodes[i].members.length; j2++) {
+            var sv = seedOf[nodes[i].members[j2].id];
+            if (sv !== undefined) vs = vs.concat(sv);
+          }
+          if (vs.length > 0) { nodeSeed[nodes[i].uid] = avg(vs); fixedSeed[nodes[i].uid] = true; }
+        }
+        for (var round = 0; round < 40; round++) {
+          for (i = 0; i < nodes.length; i++) {
+            var n2 = nodes[i];
+            if (fixedSeed[n2.uid]) continue;
+            var total = 0, cnt = 0, kk, e2;
+            for (kk = 0; kk < upOf[n2.uid].length; kk++) {
+              e2 = upOf[n2.uid][kk];
+              if (nodeSeed[e2.P.uid] !== undefined) { total += nodeSeed[e2.P.uid]; cnt++; }
+            }
+            for (kk = 0; kk < downOf[n2.uid].length; kk++) {
+              e2 = downOf[n2.uid][kk];
+              if (nodeSeed[e2.C.uid] !== undefined) { total += nodeSeed[e2.C.uid]; cnt++; }
+            }
+            if (cnt > 0) nodeSeed[n2.uid] = total / cnt;
+          }
+        }
+        var seedValue = function (n) {
+          return nodeSeed[n.uid] !== undefined ? nodeSeed[n.uid] : 1.1 + 0.0007 * nodes.indexOf(n);
+        };
+
+        // put every row in the order of the seeds
+        var rowWidth = 0;
+        for (i = 0; i <= topLevel; i++) {
+          var tot = 0;
+          for (j2 = 0; j2 < rows[i].length; j2++) tot += rows[i][j2].rw + NODE_GAP;
+          rowWidth = Math.max(rowWidth, tot);
+        }
+        for (i = 0; i <= topLevel; i++) {
+          var rowList = rows[i];
+          rowList.sort(function (a, b) {
+            var d = seedValue(a) - seedValue(b);
+            if (Math.abs(d) > 0.000000001) return d;
+            return a.x - b.x;
+          });
+          var wanted = {};
+          for (j2 = 0; j2 < rowList.length; j2++) wanted[rowList[j2].uid] = seedValue(rowList[j2]) * rowWidth - rowList[j2].rw / 2;
+          packRow(rowList, wanted);
+        }
+      }
+
+      for (var iter = 0; iter < 40; iter++) {
+        if (iter < 12) {
+          for (i = 0; i < nodes.length; i++) {
+            if (nodes[i].members.length < 2 || nodes[i] === lockedNode) continue;
+            var before = edgeCost(nodes[i]);
+            flipCluster(nodes[i]);
+            if (edgeCost(nodes[i]) >= before - 4) flipCluster(nodes[i]); // not better: flip back
+          }
+        }
+        if (iter % 2 === 0) { for (i = 0; i <= topLevel; i++) placeRow(rows[i]); }
+        else { for (i = topLevel; i >= 0; i--) placeRow(rows[i]); }
+      }
+      var leftMost = 1000000000;
+      for (i = 0; i < nodes.length; i++) leftMost = Math.min(leftMost, nodes[i].x);
+      for (i = 0; i < nodes.length; i++) {
+        for (j2 = 0; j2 < nodes[i].members.length; j2++) {
+          ctx.pos[nodes[i].members[j2].id] = { x: Math.round(PAD - leftMost + nodes[i].x + j2 * step), y: 0 };
+        }
+      }
+
+      // 4. Plan the lines. Every family gets its own horizontal "lane"
+      //    so that lines of different families never run on top of each
+      //    other, and long drops avoid passing behind other cards.
+      var half = CARD_W / 2;
+      var pos = ctx.pos;
+      var pid, L, g2;
+      var maxLevel = 0;
+      for (pid in pos) maxLevel = Math.max(maxLevel, level[pid]);
+      var cardsAt = [];
+      for (L = 0; L <= maxLevel; L++) cardsAt.push([]);
+      for (pid in pos) cardsAt[level[pid]].push(pos[pid].x);
+
+      // true if a vertical line at x can pass through the rows between two levels
+      function corridorFree(x, from, to) {
+        for (var lv = from + 1; lv < to; lv++) {
+          for (var c = 0; c < cardsAt[lv].length; c++) {
+            if (x > cardsAt[lv][c] - 10 && x < cardsAt[lv][c] + CARD_W + 10) return false;
+          }
+        }
+        return true;
+      }
+      function findCorridor(cx, from, to) {
+        if (corridorFree(cx, from, to)) return cx;
+        for (var d = 8; d <= 6000; d += 8) {
+          if (cx + d >= 8 && corridorFree(cx + d, from, to)) return cx + d;
+          if (cx - d >= 8 && corridorFree(cx - d, from, to)) return cx - d;
+        }
+        return cx;
+      }
+
+      // links between partners: neighbours get a straight link,
+      // others are linked underneath the cards
+      var unionInfo = {};
+      var arcCount = {};
+      var arcMax = [];
+      for (L = 0; L <= maxLevel; L++) arcMax.push(0);
+      for (i = 0; i < unions.length; i++) {
+        var un = unions[i];
+        var ua = pos[un.aId], ub = pos[un.bId];
+        if (ua === undefined || ub === undefined) continue;
+        var ulevel = Math.max(level[un.aId], level[un.bId]);
+        var adjacent = level[un.aId] === level[un.bId] &&
+                       Math.abs(ua.x - ub.x) <= CARD_W + COUPLE_GAP + 1;
+        var info = { adjacent: adjacent, arc: 0, level: ulevel, x: (ua.x + ub.x) / 2 + half };
+        if (!adjacent) {
+          var ck = ctx.clusterOf[un.aId].id;
+          info.arc = arcCount[ck] || 0;
+          arcCount[ck] = info.arc + 1;
+          arcMax[ulevel] = Math.max(arcMax[ulevel], info.arc + 1);
+        }
+        unionInfo[un.id] = info;
+      }
+
+      // where each family's line starts, and where each child's line goes down
+      var maxRight = 0;
+      var byLevel = [];
+      for (L = 0; L <= maxLevel; L++) byLevel.push([]);
+      for (i = 0; i < groups.length; i++) {
+        g2 = groups[i];
+        g2.drops = [];
+        var items = g2.items.filter(function (x) { return pos[x.id] !== undefined; });
+        if (items.length === 0) continue;
+        var srcLevel, ax;
+        if (g2.union !== null) {
+          if (unionInfo[g2.union.id] === undefined) continue;
+          srcLevel = unionInfo[g2.union.id].level;
+          ax = unionInfo[g2.union.id].x;
+        } else {
+          if (pos[g2.person.id] === undefined) continue;
+          srcLevel = level[g2.person.id];
+          ax = pos[g2.person.id].x + half;
+        }
+        g2.srcLevel = srcLevel;
+        g2.ax = ax;
+        var xs = [ax];
+        for (var k = 0; k < items.length; k++) {
+          var cx = pos[items[k].id].x + half;
+          var dropX = cx;
+          if (level[items[k].id] - srcLevel > 1) dropX = findCorridor(cx, srcLevel, level[items[k].id]);
+          g2.drops.push({ item: items[k], cx: cx, dropX: dropX });
+          xs.push(dropX);
+        }
+        g2.minX = Math.min.apply(null, xs);
+        g2.maxX = Math.max.apply(null, xs);
+        maxRight = Math.max(maxRight, g2.maxX);
+        byLevel[srcLevel].push(g2);
+      }
+
+      // lanes: families whose lines would overlap get different heights
+      var laneCount = [];
+      for (L = 0; L <= maxLevel; L++) {
+        var list = byLevel[L].sort(function (a, b) { return a.minX - b.minX; });
+        var overlap = function (p, q) { return p.minX < q.maxX + 14 && q.minX < p.maxX + 14; };
+        // number of line crossings if family U is drawn above family D
+        var crossAbove = function (U, D) {
+          var n = 0;
+          for (var dk = 0; dk < U.drops.length; dk++) {
+            var dx = U.drops[dk].dropX;
+            if (dx > D.minX + 1 && dx < D.maxX - 1) n++;
+          }
+          if (D.ax > U.minX + 1 && D.ax < U.maxX - 1) n++;
+          return n;
+        };
+        // put the families in the vertical order that crosses the fewest lines
+        var order = [];
+        for (i = 0; i < list.length; i++) {
+          var bestPos = order.length, bestCost = 1000000000;
+          for (var pos2 = order.length; pos2 >= 0; pos2--) {
+            var cost = 0;
+            for (var o = 0; o < order.length; o++) {
+              if (!overlap(order[o], list[i])) continue;
+              cost += o < pos2 ? crossAbove(order[o], list[i]) : crossAbove(list[i], order[o]);
+            }
+            if (cost < bestCost) { bestCost = cost; bestPos = pos2; }
+          }
+          order.splice(bestPos, 0, list[i]);
+        }
+        // families that overlap get different heights, in that order
+        var lanes = 0;
+        for (i = 0; i < order.length; i++) {
+          var lane = 0;
+          for (var o2 = 0; o2 < i; o2++) {
+            if (overlap(order[o2], order[i])) lane = Math.max(lane, order[o2].lane + 1);
+          }
+          order[i].lane = lane;
+          lanes = Math.max(lanes, lane + 1);
+        }
+        laneCount.push(lanes);
+      }
+
+      // vertical positions: rows get more room when they need more lanes
+      var laneBase = [];
+      var rowY = [PAD];
+      for (L = 0; L <= maxLevel; L++) {
+        laneBase.push(Math.max(44, 12 + 8 * arcMax[L] + 12));
+        var band = Math.max(ROW_GAP, laneBase[L] + laneCount[L] * 8 + 30);
+        rowY.push(rowY[L] + CARD_H + band);
+      }
+      for (pid in pos) pos[pid].y = rowY[level[pid]];
+      for (i = 0; i < groups.length; i++) {
+        g2 = groups[i];
+        if (g2.drops.length === 0) continue;
+        g2.busY = rowY[g2.srcLevel] + CARD_H + laneBase[g2.srcLevel] + g2.lane * 8;
+      }
+
+      var w = maxRight, h = 0;
+      for (var id in pos) {
+        w = Math.max(w, pos[id].x + CARD_W);
+        h = Math.max(h, pos[id].y + CARD_H);
+      }
+      return { pos: pos, groups: groups, clusterOf: ctx.clusterOf, unionInfo: unionInfo,
+               w: w + PAD, h: h + PAD + 30 };
+    }
+
+    // =====================================================
+    //  DRAWING
+    // =====================================================
+
+    // Each family's lines get their own color, to make them easy to follow
+    var GROUP_COLORS = ["#8e5bb0", "#1f8a8a", "#d9822b", "#8b5a2b", "#c2477f", "#7a8b1f", "#3a4a9f", "#5f6b73"];
+
+    function addPath(svg, d, cssClass, color) {
+      var path = document.createElementNS(NS, "path");
+      path.setAttribute("d", d);
+      path.setAttribute("class", cssClass);
+      if (color) path.style.stroke = color;
+      svg.appendChild(path);
+    }
+
+    // The label on the link between two people
+    function addBond(canvas, u, x, y) {
+      var el = document.createElement("span");
+      el.className = "bond " + (u.status === "" ? "plain" : u.status);
+      el.textContent = u.status === "" ? "+" : STATUS_NAMES[u.status];
+      el.style.left = x + "px";
+      el.style.top = y + "px";
+      el.title = "Click to change: married / divorced / partners / not specified";
+      el.setAttribute("data-id", u.id);
+      el.onclick = function () {
+        cycleStatus(Number(this.getAttribute("data-id")));
+      };
+      canvas.appendChild(el);
+    }
+
+    // Choose the main person and redraw
+    function changeFocus(value) {
+      focusId = value === "" ? "" : Number(value);
+      save();
+      drawTree();
+    }
+
+    // Swap which parent of a couple is placed on the left
+    function swapUnion(id) {
+      var u = findUnionById(id);
+      if (u === null) return;
+      u.swap = !u.swap;
+      save();
+      drawTree();
+    }
+
+    function cycleStatus(id) {
+      var u = findUnionById(id);
+      if (u === null) return;
+      var next = (STATUS_CYCLE.indexOf(u.status) + 1) % STATUS_CYCLE.length;
+      u.status = STATUS_CYCLE[next];
+      save();
+      drawTree();
+      showUnions();
+    }
+
+    function drawLines(svg, canvas, lay) {
+      var pos = lay.pos;
+      var half = CARD_W / 2;
+      var anchors = {};
+      var i, u, a, b;
+
+      // Links between partners (and the point the children's lines start from)
+      for (i = 0; i < unions.length; i++) {
+        u = unions[i];
+        a = pos[u.aId];
+        b = pos[u.bId];
+        var info = lay.unionInfo[u.id];
+        if (a === undefined || b === undefined || info === undefined) continue;
+        var left = a.x <= b.x ? a : b;
+        var right = a.x <= b.x ? b : a;
+        var cls = "uline " + (u.status === "" ? "plain" : u.status);
+        if (info.adjacent) {
+          var ly = a.y + CARD_H / 2;
+          addPath(svg, "M" + (left.x + CARD_W) + " " + ly + "H" + right.x, cls);
+          anchors[u.id] = { x: info.x, y: ly };
+          addBond(canvas, u, info.x, ly - 16);
+        } else {
+          // partners that are not neighbours: link them underneath the cards
+          var ay = a.y + CARD_H + 12 + info.arc * 8;
+          addPath(svg, "M" + (a.x + half) + " " + (a.y + CARD_H) + "V" + ay +
+                       "H" + (b.x + half) + "V" + (b.y + CARD_H), cls);
+          anchors[u.id] = { x: info.x, y: ay };
+          addBond(canvas, u, info.x, ay);
+        }
+      }
+
+      // Lines from each couple (or single parent) down to their children.
+      // Every family has its own color and its own lane height.
+      for (i = 0; i < lay.groups.length; i++) {
+        var g = lay.groups[i];
+        if (g.drops.length === 0) continue;
+        var anchorY;
+        if (g.union !== null) {
+          if (anchors[g.union.id] === undefined) continue;
+          anchorY = anchors[g.union.id].y;
+        } else {
+          anchorY = pos[g.person.id].y + CARD_H;
+        }
+        var color = GROUP_COLORS[i % GROUP_COLORS.length];
+        addPath(svg, "M" + g.ax + " " + anchorY + "V" + g.busY, "line", color);
+        addPath(svg, "M" + g.minX + " " + g.busY + "H" + g.maxX, "line", color);
+        for (var m = 0; m < g.drops.length; m++) {
+          var d = g.drops[m];
+          var top = pos[d.item.id].y;
+          var cssCls = isPet(d.item) ? "pline" : "line";
+          if (d.dropX === d.cx) {
+            addPath(svg, "M" + d.cx + " " + g.busY + "V" + top, cssCls, color);
+          } else {
+            // long drop: go down beside the cards in between, then over to the child
+            var jog = top - 14 - (m % 3) * 5;
+            addPath(svg, "M" + d.dropX + " " + g.busY + "V" + jog + "H" + d.cx + "V" + top, cssCls, color);
+          }
+        }
+      }
+
+      // A pet with two owners who are not a couple: dashed line to the second owner
+      for (i = 0; i < people.length; i++) {
+        var pet = people[i];
+        if (!isPet(pet) || pet.ownerId === "" || pet.owner2Id === "") continue;
+        if (findUnion(pet.ownerId, pet.owner2Id) !== null) continue;
+        var po = pos[pet.owner2Id];
+        var pp = pos[pet.id];
+        if (po === undefined || pp === undefined) continue;
+        var ym = pp.y - 10;
+        addPath(svg, "M" + (po.x + half) + " " + (po.y + CARD_H) + "V" + ym +
+                     "H" + (pp.x + half) + "V" + pp.y, "pline");
+      }
+    }
+
+    function makeButton(label, cssClass, id, action) {
+      var btn = document.createElement("button");
+      btn.textContent = label;
+      btn.className = "small " + cssClass;
+      btn.setAttribute("data-id", id);
+      btn.onclick = function () {
+        action(Number(this.getAttribute("data-id")));
+      };
+      return btn;
+    }
+
+    // The small grey text under a name
+    function personInfo(person) {
+      var parts = [];
+      if (isPet(person) && person.species !== "") parts.push(person.species);
+      if (!isPet(person) && person.gender === "female" && person.maidenName !== "") {
+        parts.push("Maiden name: " + person.maidenName);
+      }
+      if (person.birth !== "") parts.push("born " + (person.birthApprox ? "~" : "") + person.birth);
+      if (!person.alive) {
+        parts.push(person.death !== "" ? "died " + (person.deathApprox ? "~" : "") + person.death : "died");
+      }
+      return parts.join(", ");
+    }
+
+    // One card (person or pet) with its Edit and Delete buttons
+    function cardElement(person, p) {
+      var card = document.createElement("div");
+      var css = "card";
+      if (isPet(person)) css += " pet";
+      if (!person.alive) css += " dead";
+      if (person.gender === "male") css += " male";
+      if (person.gender === "female") css += " female";
+      if (person.id === editingId) css += " editing";
+      card.className = css;
+      card.style.left = p.x + "px";
+      card.style.top = p.y + "px";
+      card.style.width = CARD_W + "px";
+      card.style.height = CARD_H + "px";
+
+      var name = document.createElement("strong");
+      name.className = "cname";
+      name.textContent = (isPet(person) ? "\uD83D\uDC3E " : "") + person.name;
+      name.title = person.name;
+      if (!isPet(person) && (person.gender === "male" || person.gender === "female")) {
+        var sym = document.createElement("span");
+        sym.className = "gsym " + person.gender;
+        sym.textContent = person.gender === "male" ? "♂" : "♀";
+        sym.title = person.gender === "male" ? "Male" : "Female";
+        name.appendChild(sym);
+      }
+      if (person.notes !== "") {
+        var nb = document.createElement("span");
+        nb.className = "nbadge";
+        nb.textContent = "📝";
+        nb.title = "Has a biography";
+        card.appendChild(nb);
+      }
+      card.appendChild(name);
+
+      // clicking the card (but not its buttons) opens the full information
+      card.title = "Click for all information";
+      card.setAttribute("data-id", person.id);
+      card.onclick = function (ev) {
+        if (ev.target.closest("button")) return;
+        openInfo(Number(this.getAttribute("data-id")));
+      };
+
+      var info = personInfo(person);
+      if (info !== "") {
+        var small = document.createElement("small");
+        small.className = "cinfo";
+        small.textContent = info;
+        card.appendChild(small);
+      }
+
+      var actions = document.createElement("span");
+      actions.className = "actions";
+      actions.appendChild(makeButton("Edit", "edit", person.id, startEdit));
+      actions.appendChild(makeButton("Delete", "danger", person.id, deletePerson));
+      card.appendChild(actions);
+      return card;
+    }
+
+    // ---- The window with all the information about one person ----
+
+    function formatDate(value, approx) {
+      return (approx ? "about " : "") + value;
+    }
+
+    function openInfo(id) {
+      var person = findPerson(id);
+      if (person === null) return;
+      var body = document.getElementById("infoBody");
+      body.innerHTML = "";
+
+      var title = document.createElement("h3");
+      title.textContent = (isPet(person) ? "🐾 " : "") + person.name;
+      if (!isPet(person) && (person.gender === "male" || person.gender === "female")) {
+        var sym = document.createElement("span");
+        sym.className = "gsym " + person.gender;
+        sym.textContent = person.gender === "male" ? "♂" : "♀";
+        title.appendChild(sym);
+      }
+      body.appendChild(title);
+
+      var addRow = function (label, value) {
+        if (value === "") return;
+        var row = document.createElement("div");
+        row.className = "infoRow";
+        var l = document.createElement("span");
+        l.className = "lab";
+        l.textContent = label;
+        var v = document.createElement("span");
+        v.className = "val";
+        v.textContent = value;
+        row.appendChild(l);
+        row.appendChild(v);
+        body.appendChild(row);
+      };
+      var names = function (list) {
+        return list.map(function (x) { return x.name; }).join(", ");
+      };
+
+      if (isPet(person)) addRow("Species", person.species);
+      if (!isPet(person) && person.gender === "female") addRow("Maiden name", person.maidenName);
+      if (person.birth !== "") addRow("Born", formatDate(person.birth, person.birthApprox));
+      if (!person.alive) {
+        addRow("Died", person.death !== "" ? formatDate(person.death, person.deathApprox) : "date unknown");
+      }
+
+      if (isPet(person)) {
+        var owners = [findPerson(person.ownerId), findPerson(person.owner2Id)].filter(function (x) { return x !== null; });
+        addRow("Owners", names(owners));
+      } else {
+        var parents = [findPerson(person.parent1Id), findPerson(person.parent2Id)].filter(function (x) { return x !== null; });
+        addRow("Parents", names(parents));
+        var partnerText = unionsOf(person.id).map(function (u) {
+          var q = partnerIn(u, person.id);
+          if (q === null) return "";
+          return q.name + (u.status !== "" ? " (" + STATUS_NAMES[u.status] + ")" : "");
+        }).filter(function (t) { return t !== ""; });
+        addRow("Partners", partnerText.join(", "));
+        addRow("Children", names(people.filter(function (x) {
+          return !isPet(x) && (x.parent1Id === person.id || x.parent2Id === person.id);
+        })));
+      }
+      var pets = people.filter(function (x) {
+        return isPet(x) && (x.ownerId === person.id || x.owner2Id === person.id);
+      });
+      if (!isPet(person)) addRow("Pets", names(pets));
+
+      var bioTitle = document.createElement("h4");
+      bioTitle.textContent = "Biography";
+      body.appendChild(bioTitle);
+      var bio = document.createElement("p");
+      bio.className = "bio" + (person.notes === "" ? " none" : "");
+      bio.textContent = person.notes === "" ? "Nothing written yet. Click Edit to add a biography." : person.notes;
+      body.appendChild(bio);
+
+      document.getElementById("infoEditBtn").setAttribute("data-id", person.id);
+      document.getElementById("infoModal").style.display = "flex";
+    }
+
+    function closeInfo() {
+      document.getElementById("infoModal").style.display = "none";
+    }
+
+    function editFromInfo() {
+      var id = Number(document.getElementById("infoEditBtn").getAttribute("data-id"));
+      closeInfo();
+      startEdit(id);
+    }
+
+    document.addEventListener("keydown", function (ev) {
+      if (ev.key === "Escape") closeInfo();
+    });
+
+    function drawTree() {
+      var canvas = document.getElementById("canvas");
+      var msg = document.getElementById("treeMsg");
+      canvas.innerHTML = "";
+      msg.className = "";
+      msg.textContent = "";
+      treeSize = { w: 0, h: 0 };
+
+      if (people.length === 0) {
+        msg.className = "empty";
+        msg.textContent = "No one here yet. Add the first person below.";
+        applyScale();
+        return;
+      }
+      var lay = computeLayout();
+      if (lay === null) {
+        msg.className = "empty";
+        msg.textContent = "The tree contains a loop (for example, someone is their own ancestor). " +
+                          "Please fix the parents or relationships.";
+        applyScale();
+        return;
+      }
+
+      canvas.style.width = lay.w + "px";
+      canvas.style.height = lay.h + "px";
+      var svg = document.createElementNS(NS, "svg");
+      svg.setAttribute("class", "lines");
+      svg.setAttribute("width", lay.w);
+      svg.setAttribute("height", lay.h);
+      canvas.appendChild(svg);
+
+      drawLines(svg, canvas, lay);
+      for (var i = 0; i < people.length; i++) {
+        var p = lay.pos[people[i].id];
+        if (p !== undefined) canvas.appendChild(cardElement(people[i], p));
+      }
+      treeSize = { w: lay.w, h: lay.h };
+      applyScale();
+    }
+
+    // ---- Zoom ----
+
+    function applyScale() {
+      var canvas = document.getElementById("canvas");
+      var sizer = document.getElementById("sizer");
+      canvas.style.transform = "scale(" + scale + ")";
+      sizer.style.width = Math.ceil(treeSize.w * scale) + "px";
+      sizer.style.height = Math.ceil(treeSize.h * scale) + "px";
+    }
+
+    function zoomBy(delta) {
+      scale = Math.round((scale + delta) * 10) / 10;
+      if (scale < 0.2) scale = 0.2;
+      if (scale > 1.5) scale = 1.5;
+      applyScale();
+    }
+
+    function fitTree() {
+      if (treeSize.w === 0) return;
+      var avail = document.getElementById("treeScroll").clientWidth - 4;
+      scale = Math.max(0.2, Math.min(1, avail / treeSize.w));
+      applyScale();
+    }
+
+    // ---- Dropdowns ----
+
+    function fillChoices(selectId, excludeIds, placeholder) {
+      var select = document.getElementById(selectId);
+      select.innerHTML = "";
+      var none = document.createElement("option");
+      none.value = "";
+      none.textContent = placeholder || "(none)";
+      select.appendChild(none);
+      for (var i = 0; i < people.length; i++) {
+        if (excludeIds.indexOf(people[i].id) !== -1) continue;
+        var option = document.createElement("option");
+        option.value = people[i].id;
+        option.textContent = people[i].name +
+          (people[i].gender === "female" && people[i].maidenName !== "" ? " (maiden name " + people[i].maidenName + ")" : "");
+        select.appendChild(option);
+      }
+    }
+
+    // The small "12 people, 3 pets" line under the tree
+    function showCounts() {
+      var pets = people.filter(isPet).length;
+      var humans = people.length - pets;
+      document.getElementById("treeCount").textContent =
+        humans + (humans === 1 ? " person" : " people") + " · " +
+        pets + (pets === 1 ? " pet" : " pets");
+    }
+
+    function showPeople() {
+      drawTree();
+      showCounts();
+
+      // Pets can never be parents, owners or in a relationship
+      var petIds = [];
+      for (var a = 0; a < people.length; a++) {
+        if (isPet(people[a])) petIds.push(people[a].id);
+      }
+
+      var parentExclude = petIds.slice();
+      if (editingId !== null) {
+        parentExclude = parentExclude.concat([editingId], descendantIds(editingId));
+      }
+      fillChoices("parent1", parentExclude);
+      fillChoices("parent2", parentExclude);
+      fillChoices("owner", petIds);
+      fillChoices("owner2", petIds);
+      fillChoices("unionA", petIds, "(choose)");
+      fillChoices("unionB", petIds, "(choose)");
+      fillChoices("focusSel", petIds, "(automatic)");
+      document.getElementById("focusSel").value = focusId;
+      showUnions();
+
+      var editing = editingId !== null;
+      var kind = getType() === "pet" ? "pet" : "person";
+      document.getElementById("formTitle").textContent =
+        editing ? "Edit " + kind : "Add a " + kind;
+      document.getElementById("saveBtn").textContent =
+        editing ? "Save changes" : "Add";
+      document.getElementById("cancelBtn").style.display =
+        editing ? "inline-block" : "none";
+      // The type cannot be changed once someone is added
+      document.getElementById("typePerson").disabled = editing;
+      document.getElementById("typePet").disabled = editing;
+    }
+
+    // ---- Relationships panel ----
+
+    // Open or close the Relationships panel (the choice is remembered)
+    function setUnionsOpen(open, remember) {
+      document.getElementById("unionBody").style.display = open ? "block" : "none";
+      document.getElementById("unionArrow").innerHTML = open ? "&#9660; Hide" : "&#9654; Show";
+      document.getElementById("unionHead").setAttribute("aria-expanded", open ? "true" : "false");
+      if (remember) {
+        try { localStorage.setItem("unionsOpen", open ? "1" : "0"); } catch (e) { /* not available */ }
+      }
+    }
+
+    function toggleUnions() {
+      setUnionsOpen(document.getElementById("unionBody").style.display === "none", true);
+    }
+
+    function showUnions() {
+      document.getElementById("unionCount").textContent = unions.length === 0 ? "" : "(" + unions.length + ")";
+      var box = document.getElementById("unionList");
+      box.innerHTML = "";
+      if (unions.length === 0) {
+        var none = document.createElement("div");
+        none.className = "empty";
+        none.textContent = "No relationships yet.";
+        box.appendChild(none);
+        return;
+      }
+      for (var i = 0; i < unions.length; i++) {
+        var u = unions[i];
+        var a = findPerson(u.aId);
+        var b = findPerson(u.bId);
+        if (a === null || b === null) continue;
+
+        var row = document.createElement("div");
+        row.className = "unionRow";
+
+        var label = document.createElement("span");
+        label.textContent = a.name + " + " + b.name;
+        row.appendChild(label);
+
+        var select = document.createElement("select");
+        var options = [
+          ["", "(not specified)"],
+          ["married", "Married"],
+          ["divorced", "Divorced"],
+          ["partners", "Partners (not married)"]
+        ];
+        for (var k = 0; k < options.length; k++) {
+          var option = document.createElement("option");
+          option.value = options[k][0];
+          option.textContent = options[k][1];
+          select.appendChild(option);
+        }
+        select.value = u.status;
+        select.setAttribute("data-id", u.id);
+        select.onchange = function () {
+          changeStatus(Number(this.getAttribute("data-id")), this.value);
+        };
+        row.appendChild(select);
+
+        row.appendChild(makeButton("Swap sides", "grey", u.id, swapUnion));
+        row.appendChild(makeButton("Remove", "danger", u.id, removeUnion));
+        box.appendChild(row);
+      }
+    }
+
+    function addUnion() {
+      var va = document.getElementById("unionA").value;
+      var vb = document.getElementById("unionB").value;
+      var status = document.getElementById("unionStatus").value;
+      if (va === "" || vb === "") {
+        alert("Please choose both people.");
+        return;
+      }
+      if (va === vb) {
+        alert("Please choose two different people.");
+        return;
+      }
+      var a = Number(va);
+      var b = Number(vb);
+      if (findUnion(a, b) !== null) {
+        alert("These two already have a relationship in the list. Change its status there.");
+        return;
+      }
+      if (ancestorIds(a).indexOf(b) !== -1 || ancestorIds(b).indexOf(a) !== -1) {
+        alert("A person cannot have a relationship with their own parent or grandparent.");
+        return;
+      }
+
+      var backup = JSON.stringify(unions);
+      unions.push({ id: newId(), aId: a, bId: b, status: status });
+      if (computeLevels() === null) {
+        unions = JSON.parse(backup);
+        alert("That relationship does not fit into the tree. Nothing was saved.");
+        return;
+      }
+      save();
+      showPeople();
+    }
+
+    function changeStatus(id, status) {
+      var u = findUnionById(id);
+      if (u === null) return;
+      u.status = status;
+      save();
+      drawTree();
+      showUnions();
+    }
+
+    function haveCommonChildren(u) {
+      return people.some(function (x) {
+        return !isPet(x) &&
+          ((x.parent1Id === u.aId && x.parent2Id === u.bId) ||
+           (x.parent1Id === u.bId && x.parent2Id === u.aId));
+      });
+    }
+
+    function removeUnion(id) {
+      var u = findUnionById(id);
+      if (u === null) return;
+      if (haveCommonChildren(u)) {
+        alert("These two have a child together, so they stay shown together. " +
+              "Set the status to Divorced instead.");
+        return;
+      }
+      if (!confirm("Remove this relationship?")) return;
+      unions = unions.filter(function (x) { return x.id !== id; });
+      save();
+      showPeople();
+    }
+
+    // ---- The person / pet form ----
+
+    function getType() {
+      return document.getElementById("typePet").checked ? "pet" : "person";
+    }
+
+    // Show person fields or pet fields depending on the type
+    function toggleType() {
+      var pet = getType() === "pet";
+      document.getElementById("personRows").style.display = pet ? "none" : "block";
+      document.getElementById("genderRows").style.display = pet ? "none" : "grid";
+      document.getElementById("petRows").style.display = pet ? "block" : "none";
+      var editing = editingId !== null;
+      var kind = pet ? "pet" : "person";
+      document.getElementById("formTitle").textContent =
+        editing ? "Edit " + kind : "Add a " + kind;
+    }
+
+    // Show the maiden name box only when "Female" is chosen
+    function toggleGender() {
+      var female = document.getElementById("gender").value === "female";
+      document.getElementById("maidenRow").style.display = female ? "block" : "none";
+    }
+
+    // Reads a date typed as 1963, 1963-08, 08.1963, 1963-08-16 or 16.08.1963.
+    // Returns { ok: true, value: "1963-08-16" } (value is "" when empty),
+    // or { ok: false } when the text is not a real date.
+    function parseDate(text) {
+      var t = String(text).trim();
+      if (t === "") return { ok: true, value: "" };
+      var m, y, mo, d;
+      if ((m = /^(\d{4})$/.exec(t))) { y = m[1]; }
+      else if ((m = /^(\d{4})[-./](\d{1,2})$/.exec(t))) { y = m[1]; mo = m[2]; }
+      else if ((m = /^(\d{1,2})[-./](\d{4})$/.exec(t))) { y = m[2]; mo = m[1]; }
+      else if ((m = /^(\d{4})[-./](\d{1,2})[-./](\d{1,2})$/.exec(t))) { y = m[1]; mo = m[2]; d = m[3]; }
+      else if ((m = /^(\d{1,2})[-./](\d{1,2})[-./](\d{4})$/.exec(t))) { y = m[3]; mo = m[2]; d = m[1]; }
+      else return { ok: false };
+      var yn = Number(y);
+      if (yn < 1000 || yn > 2200) return { ok: false };
+      var value = y;
+      if (mo !== undefined) {
+        var mn = Number(mo);
+        if (mn < 1 || mn > 12) return { ok: false };
+        value += "-" + (mn < 10 ? "0" : "") + mn;
+        if (d !== undefined) {
+          var dn = Number(d);
+          if (dn < 1 || dn > new Date(yn, mn, 0).getDate()) return { ok: false };
+          value += "-" + (dn < 10 ? "0" : "") + dn;
+        }
+      }
+      return { ok: true, value: value };
+    }
+
+    // Compares two dates that may be only a year or a year and month:
+    // only the part they both have is compared. Returns -1, 0 or 1.
+    function compareDates(a, b) {
+      var n = Math.min(a.length, b.length);
+      var x = a.slice(0, n), y = b.slice(0, n);
+      return x < y ? -1 : (x > y ? 1 : 0);
+    }
+
+    // Show the death date box only when "Alive" is unticked
+    function toggleDeath() {
+      var alive = document.getElementById("alive").checked;
+      document.getElementById("deathRow").style.display =
+        alive ? "none" : "block";
+    }
+
+    function clearForm() {
+      document.getElementById("typePerson").checked = true;
+      document.getElementById("name").value = "";
+      document.getElementById("gender").value = "";
+      document.getElementById("maiden").value = "";
+      document.getElementById("notes").value = "";
+      toggleGender();
+      document.getElementById("birth").value = "";
+      document.getElementById("birthApprox").value = "exact";
+      document.getElementById("alive").checked = true;
+      document.getElementById("death").value = "";
+      document.getElementById("deathApprox").value = "exact";
+      document.getElementById("species").value = "";
+      toggleType();
+      toggleDeath();
+    }
+
+    function startEdit(id) {
+      var person = findPerson(id);
+      editingId = id;
+      document.getElementById(isPet(person) ? "typePet" : "typePerson").checked = true;
+      showPeople();
+      toggleType();
+      document.getElementById("name").value = person.name;
+      document.getElementById("gender").value = person.gender;
+      document.getElementById("maiden").value = person.maidenName;
+      document.getElementById("notes").value = person.notes;
+      toggleGender();
+      document.getElementById("birth").value = person.birth;
+      document.getElementById("birthApprox").value = person.birthApprox ? "approx" : "exact";
+      document.getElementById("alive").checked = person.alive;
+      document.getElementById("death").value = person.death;
+      document.getElementById("deathApprox").value = person.deathApprox ? "approx" : "exact";
+      toggleDeath();
+      document.getElementById("species").value = person.species;
+      document.getElementById("owner").value = person.ownerId;
+      document.getElementById("owner2").value = person.owner2Id;
+      document.getElementById("parent1").value = person.parent1Id;
+      document.getElementById("parent2").value = person.parent2Id;
+      // Scroll down to the form (handy on a phone)
+      document.getElementById("formPanel").scrollIntoView();
+    }
+
+    function cancelEdit() {
+      editingId = null;
+      clearForm();
+      showPeople();
+    }
+
+    function savePerson() {
+      var type = getType();
+      var name = document.getElementById("name").value;
+      var alive = document.getElementById("alive").checked;
+      var v1 = document.getElementById("parent1").value;
+      var v2 = document.getElementById("parent2").value;
+      var vo = document.getElementById("owner").value;
+      var vo2 = document.getElementById("owner2").value;
+      var species = document.getElementById("species").value;
+      if (name === "") return;
+      // gender and maiden name are for people only; a maiden name only for women
+      var gender = type === "pet" ? "" : document.getElementById("gender").value;
+      var maidenName = gender === "female" ? document.getElementById("maiden").value.trim() : "";
+      var notes = document.getElementById("notes").value.trim();
+
+      var birthResult = parseDate(document.getElementById("birth").value);
+      if (!birthResult.ok) {
+        alert("The birth date is not clear. Please type a year (1963), a month and year (1963-08 or 08.1963), " +
+              "or a full date (1963-08-16 or 16.08.1963), or leave it empty.");
+        return;
+      }
+      var deathResult = alive ? { ok: true, value: "" } : parseDate(document.getElementById("death").value);
+      if (!deathResult.ok) {
+        alert("The death date is not clear. Please type a year (2015), a month and year (2015-06 or 06.2015), " +
+              "or a full date (2015-06-01 or 01.06.2015), or leave it empty.");
+        return;
+      }
+      var birth = birthResult.value;
+      var death = deathResult.value;
+      var birthApprox = birth !== "" && document.getElementById("birthApprox").value === "approx";
+      var deathApprox = death !== "" && document.getElementById("deathApprox").value === "approx";
+      if (death !== "" && birth !== "" && compareDates(death, birth) < 0) {
+        alert("The death date cannot be earlier than the birth date.");
+        return;
+      }
+
+      var parent1Id = "", parent2Id = "";
+      var ownerId = "", owner2Id = "";
+      if (type === "pet") {
+        if (vo !== "" && vo === vo2) {
+          alert("Owner 1 and Owner 2 must be different people.");
+          return;
+        }
+        ownerId = vo === "" ? "" : Number(vo);
+        owner2Id = vo2 === "" ? "" : Number(vo2);
+      } else {
+        if (v1 !== "" && v1 === v2) {
+          alert("Parent 1 and Parent 2 must be different people.");
+          return;
+        }
+        parent1Id = v1 === "" ? "" : Number(v1);
+        parent2Id = v2 === "" ? "" : Number(v2);
+        species = "";
+      }
+
+      var backup = JSON.stringify({ people: people, unions: unions }); // for undoing
+      var person;
+      if (editingId === null) {
+        person = {
+          id: newId(), type: type, name: name, gender: gender, maidenName: maidenName, notes: notes,
+          birth: birth, birthApprox: birthApprox,
+          alive: alive, death: death, deathApprox: deathApprox, species: species,
+          ownerId: ownerId, owner2Id: owner2Id,
+          parent1Id: parent1Id, parent2Id: parent2Id
+        };
+        people.push(person);
+      } else {
+        person = findPerson(editingId);
+        person.name = name;
+        person.gender = gender;
+        person.maidenName = maidenName;
+        person.notes = notes;
+        person.birth = birth;
+        person.birthApprox = birthApprox;
+        person.alive = alive;
+        person.death = death;
+        person.deathApprox = deathApprox;
+        person.species = species;
+        person.ownerId = ownerId;
+        person.owner2Id = owner2Id;
+        person.parent1Id = parent1Id;
+        person.parent2Id = parent2Id;
+      }
+      ensureUnions();
+
+      // Safety check: the family must not contain a loop
+      if (computeLevels() === null) {
+        var old = JSON.parse(backup);
+        people = old.people;
+        unions = old.unions;
+        alert("That combination of parents or owners is impossible " +
+              "(for example, someone who would be their own ancestor). Nothing was saved.");
+        return;
+      }
+
+      editingId = null;
+      save();
+      clearForm();
+      showPeople();
+    }
+
+    function deletePerson(id) {
+      if (!confirm("Delete this entry?")) return;
+      people = people.filter(function (p) { return p.id !== id; });
+      unions = unions.filter(function (u) { return u.aId !== id && u.bId !== id; });
+      if (focusId === id) focusId = "";
+      for (var i = 0; i < people.length; i++) {
+        if (people[i].parent1Id === id) people[i].parent1Id = "";
+        if (people[i].parent2Id === id) people[i].parent2Id = "";
+        if (people[i].ownerId === id) people[i].ownerId = "";
+        if (people[i].owner2Id === id) people[i].owner2Id = "";
+      }
+      if (editingId === id) {
+        editingId = null;
+        clearForm();
+      }
+      save();
+      showPeople();
+    }
+
+    // ---- Backup ----
+
+    function exportData() {
+      var text = JSON.stringify({ people: people, unions: unions, focusId: focusId }, null, 2);
+      var blob = new Blob([text], { type: "application/json" });
+      var link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "familytree-backup.json";
+      link.click();
+    }
+
+    function importData(input) {
+      var file = input.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function () {
+        try {
+          var data = JSON.parse(reader.result);
+          // Old backups are just a list of people; new ones also hold relationships
+          var list = Array.isArray(data) ? data : data.people;
+          var unionList = Array.isArray(data) ? [] : (data.unions || []);
+          var valid = Array.isArray(list) && Array.isArray(unionList) &&
+            list.every(function (p) {
+              return p && typeof p.name === "string" && p.id !== undefined;
+            });
+          if (!valid) throw new Error("bad file");
+          if (!confirm("This replaces ALL current entries with the backup. Continue?")) return;
+          people = list;
+          unions = unionList;
+          focusId = (!Array.isArray(data) && data.focusId !== undefined) ? data.focusId : "";
+          upgradeData();
+          editingId = null;
+          save();
+          clearForm();
+          showPeople();
+        } catch (e) {
+          alert("This file is not a valid family tree backup.");
+        }
+      };
+      reader.readAsText(file);
+      input.value = "";
+    }
+
+    upgradeData();
+    save();
+    showPeople();
+    var unionsWereOpen = false;
+    try { unionsWereOpen = localStorage.getItem("unionsOpen") === "1"; } catch (e) { /* not available */ }
+    setUnionsOpen(unionsWereOpen, false);
+
+    // Make the page work offline once it has been opened online one time
+    // (only when served from a web address; not when opened as a file on the laptop)
+    if ("serviceWorker" in navigator && location.protocol !== "file:") {
+      window.addEventListener("load", function () {
+        navigator.serviceWorker.register("sw.js").catch(function () { /* offline mode not available */ });
+      });
+    }
+    // Ask the phone not to delete the saved family data when it is short of space
+    if (navigator.storage && navigator.storage.persist) {
+      navigator.storage.persist().catch(function () { /* not available */ });
+    }
+  </script>
+</body>
+</html>
