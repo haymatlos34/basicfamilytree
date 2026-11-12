@@ -46,7 +46,8 @@
     /* ---- The tree canvas ---- */
     .treeHead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
     .treeHead h3 { margin: 0; }
-    .zoomBtns { display: flex; gap: 6px; }
+    .zoomBtns { display: flex; gap: 6px; align-items: center; }
+    .hideLabel { font-size: 0.9rem; margin-right: 8px; white-space: nowrap; cursor: pointer; }
     #treeScroll { overflow: auto; max-height: 80vh; border: 1px solid #eee; border-radius: 8px; background: #fcfbf8; }
     #sizer { position: relative; }
     #canvas { position: relative; transform-origin: 0 0; }
@@ -243,6 +244,7 @@
       <div class="treeHead">
         <h3>Tree</h3>
         <span class="zoomBtns">
+          <label class="hideLabel"><input type="checkbox" id="hidePets" onchange="changeHidePets()"> Hide pets</label>
           <button class="small grey" onclick="zoomBy(-0.1)">&minus;</button>
           <button class="small grey" onclick="fitTree()">Fit</button>
           <button class="small grey" onclick="zoomBy(0.1)">+</button>
@@ -1588,7 +1590,24 @@
       if (ev.key === "Escape") closeInfo();
     });
 
+    var hidePets = false; // when true, pets are left out of the drawing
+
+    // Draws the tree; with "Hide pets" ticked, pets are left out
     function drawTree() {
+      if (!hidePets) { drawTreeNow(); return; }
+      var everyone = people;
+      people = everyone.filter(function (x) { return !isPet(x); });
+      try { drawTreeNow(); } finally { people = everyone; }
+    }
+
+    function changeHidePets() {
+      hidePets = document.getElementById("hidePets").checked;
+      try { localStorage.setItem("hidePets", hidePets ? "1" : "0"); } catch (e) { /* not available */ }
+      drawTree();
+      showCounts();
+    }
+
+    function drawTreeNow() {
       var canvas = document.getElementById("canvas");
       var msg = document.getElementById("treeMsg");
       canvas.innerHTML = "";
@@ -1677,7 +1696,7 @@
       var humans = people.length - pets;
       document.getElementById("treeCount").textContent =
         humans + (humans === 1 ? " person" : " people") + " · " +
-        pets + (pets === 1 ? " pet" : " pets");
+        pets + (pets === 1 ? " pet" : " pets") + (hidePets && pets > 0 ? " (hidden)" : "");
     }
 
     function showPeople() {
@@ -2128,6 +2147,8 @@
       input.value = "";
     }
 
+    try { hidePets = localStorage.getItem("hidePets") === "1"; } catch (e) { /* not available */ }
+    document.getElementById("hidePets").checked = hidePets;
     upgradeData();
     save();
     showPeople();
