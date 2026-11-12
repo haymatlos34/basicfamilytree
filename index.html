@@ -100,6 +100,17 @@
     .card.male:not(.pet)   { border-top-color: #3d7ab8; }
     .card.female:not(.pet) { border-top-color: #c75d86; }
     .card.editing { outline: 3px solid #4a90d9; }
+    .ctop { display: flex; align-items: center; gap: 7px; min-width: 0; }
+    .ctop .cname { flex: 1; min-width: 0; }
+    .avatar { flex: 0 0 auto; width: 40px; height: 40px; border-radius: 50%; object-fit: cover;
+              border: 2px solid #fff; box-shadow: 0 0 0 1px #bbb; background: #ddd; }
+    .avatar.big { width: 96px; height: 96px; display: block; margin: 0 auto 10px; border-width: 3px; }
+    #cropCanvas { display: block; margin: 0 auto; width: 280px; height: 280px; max-width: 100%; border-radius: 10px;
+                  background: #222; touch-action: none; cursor: grab; }
+    .cropHint { text-align: center; color: var(--muted); font-size: 0.85rem; margin: 8px 0; }
+    .photoRow { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+    .photoRow .avatar { width: 64px; height: 64px; }
+    .photoRow .avatar.empty { display: flex; align-items: center; justify-content: center; font-size: 1.6rem; color: #888; }
     .cname {
       display: -webkit-box;
       -webkit-line-clamp: 2;
@@ -312,6 +323,16 @@
         </div>
       </div>
 
+      <div class="field">Profile picture (optional)
+        <div class="photoRow">
+          <img id="photoPreview" class="avatar" alt="" style="display:none">
+          <div id="photoEmpty" class="avatar empty">&#128100;</div>
+          <input type="file" id="photoFile" accept="image/*" onchange="choosePhoto(this)" style="display:none">
+          <button type="button" class="grey" onclick="document.getElementById('photoFile').click()">Choose picture</button>
+          <button type="button" class="grey" id="photoRemove" onclick="removePhoto()" style="display:none">Remove</button>
+        </div>
+      </div>
+
       <label class="field">Biography / information (optional)
         <textarea id="notes" rows="6" placeholder="Where they were born and lived, if they migrated, work, family stories, anything you want to remember..."></textarea>
       </label>
@@ -371,6 +392,19 @@
       <label class="field" style="margin-top:12px">Import backup
         <input type="file" id="importFile" accept=".json" onchange="importData(this)">
       </label>
+    </div>
+  </div>
+
+  <div id="cropModal" class="modal">
+    <div class="modalBox">
+      <h3 style="margin-top:0">Position the picture</h3>
+      <canvas id="cropCanvas" width="280" height="280"></canvas>
+      <div class="cropHint">Drag to move. Use the slider (or pinch) to zoom.</div>
+      <input type="range" id="cropZoom" min="0" max="100" value="0" style="width:100%" oninput="cropZoomChanged()">
+      <div class="buttons" style="margin-top:12px">
+        <button onclick="cropDone()">Use this picture</button>
+        <button class="grey" onclick="cropCancel()">Cancel</button>
+      </div>
     </div>
   </div>
 
@@ -434,6 +468,7 @@
         if (p.gender === undefined) p.gender = "";
         if (p.maidenName === undefined) p.maidenName = "";
         if (p.notes === undefined) p.notes = "";
+        if (p.photo === undefined) p.photo = "";
         if (p.birthApprox === undefined) p.birthApprox = false;
         if (p.deathApprox === undefined) p.deathApprox = false;
         if (p.type === undefined) p.type = "person";
@@ -1538,7 +1573,19 @@
         nb.title = "Has a biography";
         card.appendChild(nb);
       }
-      card.appendChild(name);
+      if (person.photo) {
+        var top = document.createElement("div");
+        top.className = "ctop";
+        var img = document.createElement("img");
+        img.className = "avatar";
+        img.src = person.photo;
+        img.alt = "";
+        top.appendChild(img);
+        top.appendChild(name);
+        card.appendChild(top);
+      } else {
+        card.appendChild(name);
+      }
 
       // clicking the card (but not its buttons) opens the full information
       card.title = "Click for all information";
@@ -1604,6 +1651,13 @@
         return list.map(function (x) { return x.name; }).join(", ");
       };
 
+      if (person.photo) {
+        var big = document.createElement("img");
+        big.className = "avatar big";
+        big.src = person.photo;
+        big.alt = "";
+        body.appendChild(big);
+      }
       if (isPet(person)) addRow("Species", person.species);
       if (!isPet(person) && person.gender === "female") addRow("Maiden name", person.maidenName);
       if (person.birth !== "") addRow("Born", formatDate(person.birth, person.birthApprox));
@@ -2004,7 +2058,158 @@
         alive ? "none" : "block";
     }
 
+    // ---- Profile picture: shrunk to a small square so it stays light ----
+    var pendingPhoto = null;   // null = unchanged, "" = removed, text = new picture
+
+    function showPhotoPreview(data) {
+      var img = document.getElementById("photoPreview");
+      if (data) img.src = data;
+      img.style.display = data ? "block" : "none";
+      document.getElementById("photoEmpty").style.display = data ? "none" : "flex";
+      document.getElementById("photoRemove").style.display = data ? "inline-block" : "none";
+    }
+
+    function choosePhoto(input) {
+      var file = input.files && input.files[0];
+      input.value = "";
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function () {
+        var img = new Image();
+        img.onload = function () { openCrop(img); };
+        img.onerror = function () { alert("That file could not be read as a picture."); };
+        img.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    // ---- The crop window: drag and zoom the picture inside a round frame ----
+    var CROP_V = 280;                       // size of the crop window on screen
+    var crop = { img: null, s: 1, minS: 1, x: 0, y: 0 };
+    var cropPointers = {};                  // active fingers / mouse: id -> {x, y}
+    var cropLastDist = 0;
+
+    function cropClamp() {
+      var w = crop.img.width * crop.s, h = crop.img.height * crop.s;
+      crop.x = Math.min(0, Math.max(CROP_V - w, crop.x));
+      crop.y = Math.min(0, Math.max(CROP_V - h, crop.y));
+    }
+
+    function cropDraw() {
+      var c = document.getElementById("cropCanvas");
+      var g = c.getContext("2d");
+      g.clearRect(0, 0, CROP_V, CROP_V);
+      g.drawImage(crop.img, crop.x, crop.y, crop.img.width * crop.s, crop.img.height * crop.s);
+      // darken everything outside the round frame
+      g.save();
+      g.fillStyle = "rgba(0,0,0,0.55)";
+      g.beginPath();
+      g.rect(0, 0, CROP_V, CROP_V);
+      g.arc(CROP_V / 2, CROP_V / 2, CROP_V / 2 - 6, 0, Math.PI * 2, true);
+      g.fill("evenodd");
+      g.restore();
+      g.strokeStyle = "#fff";
+      g.lineWidth = 2;
+      g.beginPath();
+      g.arc(CROP_V / 2, CROP_V / 2, CROP_V / 2 - 6, 0, Math.PI * 2);
+      g.stroke();
+    }
+
+    // Change the zoom but keep the centre of the window where it is
+    function cropSetScale(ns) {
+      ns = Math.min(crop.minS * 4, Math.max(crop.minS, ns));
+      var cx = CROP_V / 2, cy = CROP_V / 2;
+      crop.x = cx - (cx - crop.x) * (ns / crop.s);
+      crop.y = cy - (cy - crop.y) * (ns / crop.s);
+      crop.s = ns;
+      cropClamp();
+      document.getElementById("cropZoom").value = Math.round((crop.s / crop.minS - 1) / 3 * 100);
+      cropDraw();
+    }
+
+    function cropZoomChanged() {
+      var v = Number(document.getElementById("cropZoom").value);
+      cropSetScale(crop.minS * (1 + 3 * v / 100));
+    }
+
+    function openCrop(img) {
+      crop.img = img;
+      crop.minS = CROP_V / Math.min(img.width, img.height);
+      crop.s = crop.minS;
+      crop.x = (CROP_V - img.width * crop.s) / 2;
+      crop.y = (CROP_V - img.height * crop.s) / 2;
+      document.getElementById("cropZoom").value = 0;
+      cropPointers = {};
+      cropDraw();
+      document.getElementById("cropModal").style.display = "flex";
+    }
+
+    function cropCancel() {
+      document.getElementById("cropModal").style.display = "none";
+      crop.img = null;
+    }
+
+    function cropDone() {
+      var size = 160, k = size / CROP_V;
+      var out = document.createElement("canvas");
+      out.width = size;
+      out.height = size;
+      out.getContext("2d").drawImage(crop.img, crop.x * k, crop.y * k, crop.img.width * crop.s * k, crop.img.height * crop.s * k);
+      pendingPhoto = out.toDataURL("image/jpeg", 0.85);
+      showPhotoPreview(pendingPhoto);
+      cropCancel();
+    }
+
+    function cropDist() {
+      var ids = Object.keys(cropPointers);
+      var a = cropPointers[ids[0]], b = cropPointers[ids[1]];
+      return Math.sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y));
+    }
+
+    // Mouse, finger and pinch handling for the crop window
+    (function () {
+      var c = document.getElementById("cropCanvas");
+      c.addEventListener("pointerdown", function (e) {
+        c.setPointerCapture(e.pointerId);
+        cropPointers[e.pointerId] = { x: e.clientX, y: e.clientY };
+        if (Object.keys(cropPointers).length === 2) cropLastDist = cropDist();
+      });
+      c.addEventListener("pointermove", function (e) {
+        var p = cropPointers[e.pointerId];
+        if (!p || !crop.img) return;
+        var n = Object.keys(cropPointers).length;
+        var ratio = CROP_V / c.getBoundingClientRect().width;
+        if (n === 1) {
+          crop.x += (e.clientX - p.x) * ratio;
+          crop.y += (e.clientY - p.y) * ratio;
+          cropClamp();
+          cropDraw();
+        }
+        p.x = e.clientX;
+        p.y = e.clientY;
+        if (n === 2) {
+          var d = cropDist();
+          if (cropLastDist > 0) cropSetScale(crop.s * d / cropLastDist);
+          cropLastDist = d;
+        }
+      });
+      var up = function (e) { delete cropPointers[e.pointerId]; cropLastDist = 0; };
+      c.addEventListener("pointerup", up);
+      c.addEventListener("pointercancel", up);
+      c.addEventListener("wheel", function (e) {
+        e.preventDefault();
+        if (crop.img) cropSetScale(crop.s * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
+      }, { passive: false });
+    })();
+
+    function removePhoto() {
+      pendingPhoto = "";
+      showPhotoPreview("");
+    }
+
     function clearForm() {
+      pendingPhoto = null;
+      showPhotoPreview("");
       document.getElementById("typePerson").checked = true;
       document.getElementById("name").value = "";
       document.getElementById("gender").value = "";
@@ -2031,6 +2236,8 @@
       document.getElementById("gender").value = person.gender;
       document.getElementById("maiden").value = person.maidenName;
       document.getElementById("notes").value = person.notes;
+      pendingPhoto = null;
+      showPhotoPreview(person.photo);
       toggleGender();
       document.getElementById("birth").value = person.birth;
       document.getElementById("birthApprox").value = person.birthApprox ? "approx" : "exact";
@@ -2113,6 +2320,7 @@
       if (editingId === null) {
         person = {
           id: newId(), type: type, name: name, gender: gender, maidenName: maidenName, notes: notes,
+          photo: pendingPhoto === null ? "" : pendingPhoto,
           birth: birth, birthApprox: birthApprox,
           alive: alive, death: death, deathApprox: deathApprox, species: species,
           ownerId: ownerId, owner2Id: owner2Id,
@@ -2125,6 +2333,7 @@
         person.gender = gender;
         person.maidenName = maidenName;
         person.notes = notes;
+        if (pendingPhoto !== null) person.photo = pendingPhoto;
         person.birth = birth;
         person.birthApprox = birthApprox;
         person.alive = alive;
