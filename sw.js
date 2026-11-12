@@ -1,6 +1,6 @@
 // Keeps a copy of the app on the phone so it opens without internet.
 // Your family data is NOT stored here: it stays in the app's own storage on the phone.
-var CACHE = "familytree-app-v1";
+var CACHE = "familytree-app-v2";
 var FILES = ["./", "index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png", "icon-maskable-512.png"];
 
 self.addEventListener("install", function (event) {

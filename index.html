@@ -932,6 +932,71 @@
           downOf[groups[i].cluster.uid].push(edge);
         }
       }
+      // Brothers and sisters of the same parents must stand together. In a
+      // couple, the brothers and sisters of the left partner go to the left
+      // of the couple and those of the right partner go to the right, so the
+      // two sets of siblings never mix.
+      var groupKids = {}; // group -> boxes (not pets) hanging from it
+      for (i = 0; i < nodes.length; i++) {
+        if (isPet(nodes[i].members[0])) continue;
+        for (j2 = 0; j2 < upOf[nodes[i].uid].length; j2++) {
+          var gk = upOf[nodes[i].uid][j2].g.key;
+          if (groupKids[gk] === undefined) groupKids[gk] = [];
+          if (groupKids[gk].indexOf(nodes[i]) === -1) groupKids[gk].push(nodes[i]);
+        }
+      }
+      function siblingsOf(X, member, list) {
+        var found = [];
+        for (var a = 0; a < upOf[X.uid].length; a++) {
+          if (upOf[X.uid][a].id !== member.id) continue;
+          var kids = groupKids[upOf[X.uid][a].g.key] || [];
+          for (var b = 0; b < kids.length; b++) {
+            if (kids[b] !== X && list.indexOf(kids[b]) !== -1 && found.indexOf(kids[b]) === -1) found.push(kids[b]);
+          }
+        }
+        return found;
+      }
+      function enforceSiblings(list) {
+        if (!keepSiblingsApart) return;
+        var couples = list.filter(function (n) { return n.members.length >= 2 && !isPet(n.members[0]); });
+        // two couples that join the same two families in opposite directions
+        // (for example double cousin marriages) cannot both be satisfied: leave those alone
+        var wanted = couples.map(function (X) {
+          var l = [], r = [];
+          for (var a = 0; a < upOf[X.uid].length; a++) {
+            var e = upOf[X.uid][a];
+            if (e.id === X.members[0].id) l.push(e.g.key);
+            if (e.id === X.members[X.members.length - 1].id) r.push(e.g.key);
+          }
+          return { X: X, left: l.length ? l[0] : null, right: r.length ? r[0] : null };
+        });
+        couples = couples.filter(function (X) {
+          var me = wanted.filter(function (w) { return w.X === X; })[0];
+          if (me.left === null || me.right === null) return false; // a partner from outside the family: nothing to keep apart
+          return !wanted.some(function (w) { return w.X !== X && w.left === me.right && w.right === me.left; });
+        });
+        for (var pass = 0; pass < 3; pass++) {
+          for (var c = 0; c < couples.length; c++) {
+            var X = couples[c];
+            var sides = [{ member: X.members[0], left: true }, { member: X.members[X.members.length - 1], left: false }];
+            var leftSet = siblingsOf(X, sides[0].member, list);
+            var rightSet = siblingsOf(X, sides[1].member, list);
+            for (var s = 0; s < 2; s++) {
+              var set = s === 0 ? leftSet : rightSet;
+              var other = s === 0 ? rightSet : leftSet;
+              // skip anyone who is a sibling of both partners (cannot be on both sides)
+              set = set.filter(function (n) { return other.indexOf(n) === -1; });
+              if (set.length === 0) continue;
+              var picked = list.filter(function (n) { return set.indexOf(n) !== -1; });
+              var rest = list.filter(function (n) { return set.indexOf(n) === -1; });
+              var at = rest.indexOf(X);
+              Array.prototype.splice.apply(rest, [sides[s].left ? at : at + 1, 0].concat(picked));
+              Array.prototype.splice.apply(list, [0, list.length].concat(rest));
+            }
+          }
+        }
+      }
+
       function edgeCost(nd) {
         var cost = 0, k, e;
         for (k = 0; k < upOf[nd.uid].length; k++) {
@@ -967,11 +1032,13 @@
         var want = {};
         var k;
         for (k = 0; k < list.length; k++) want[list[k].uid] = desiredX(list[k]);
+        // compare the wanted middle of each box, so wide couples are not placed too early
         list.sort(function (a, b) {
-          var diff = want[a.uid] - want[b.uid];
+          var diff = (want[a.uid] + a.rw / 2) - (want[b.uid] + b.rw / 2);
           if (Math.abs(diff) > 0.5) return diff;
           return a.x - b.x;
         });
+        enforceSiblings(list);
         packRow(list, want);
       }
       // place the boxes of a row in the given order, without overlap,
@@ -1102,6 +1169,7 @@
             if (Math.abs(d) > 0.000000001) return d;
             return a.x - b.x;
           });
+          enforceSiblings(rowList);
           var wanted = {};
           for (j2 = 0; j2 < rowList.length; j2++) wanted[rowList[j2].uid] = seedValue(rowList[j2]) * rowWidth - rowList[j2].rw / 2;
           packRow(rowList, wanted);
@@ -1591,6 +1659,7 @@
     });
 
     var hidePets = false; // when true, pets are left out of the drawing
+    var keepSiblingsApart = true; // brothers and sisters of a couple's two partners never mix
 
     // Draws the tree; with "Hide pets" ticked, pets are left out
     function drawTree() {
